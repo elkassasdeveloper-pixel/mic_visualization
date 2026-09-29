@@ -31,6 +31,10 @@ dependencies:
   flutter_perf_monitor: ^0.3.1
   web: ^1.1.1
   uuid: ^4.6.0
+  permission_handler: ^13.0.2
+  network_info_plus: ^8.2.1
+  esp_smartconfig: ^3.0.0
+  flutter_foreground_task: ^11.0.3
 
 dev_dependencies:
   flutter_test:

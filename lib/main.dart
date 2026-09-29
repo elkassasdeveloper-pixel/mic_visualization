@@ -1,6 +1,10 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_perf_monitor/flutter_perf_monitor.dart';
 import 'package:mic_visualization/app/startup/startup_cubit.dart';
 import 'package:mic_visualization/app/startup/startup_screen.dart';
@@ -14,6 +18,10 @@ import 'package:mic_visualization/data/services/database_ffi.dart';
 
 void main() async{
   WidgetsFlutterBinding.ensureInitialized();
+  // Required before runApp() when using flutter_foreground_task (Android only).
+  if (!kIsWeb && Platform.isAndroid) {
+    FlutterForegroundTask.initCommunicationPort();
+  }
   initializeDatabaseFfi();
   FlutterPerfMonitor.initialize();
   await SystemChrome.setPreferredOrientations([
@@ -54,9 +62,9 @@ class MyApp extends StatelessWidget {
             home: BlocProvider(
               create: (context) =>
                   StartupCubit(
-                    ApiAuthRepository(AuthApiService()),
-                    CentrifugeRealtimeRepository(),
-                    settingsRepository
+                      ApiAuthRepository(AuthApiService()),
+                      CentrifugeRealtimeRepository(),
+                      settingsRepository
                   ),
               child: StartupScreen(settingsRepository: settingsRepository,),
             ),
