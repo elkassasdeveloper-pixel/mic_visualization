@@ -1,0 +1,73 @@
+name: mic_visualization
+description: "Mic's Visualization"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_bloc: ^9.1.1
+  record: ^7.1.1
+  dio: ^5.11.0
+  centrifuge: ^0.20.0
+  flutter_litert: ^3.8.0
+  sqflite: ^2.4.3
+  sqflite_common_ffi: ^2.4.2+1
+  sqflite_common_ffi_web: ^1.1.2
+  path: ^1.9.1
+  syncfusion_flutter_datagrid: ^34.2.4
+  syncfusion_flutter_pdf: ^34.2.4
+  syncfusion_flutter_xlsio: ^34.2.4
+  path_provider: ^2.1.6
+  intl: ^0.20.3
+  syncfusion_flutter_core: ^34.2.4
+  file_picker: ^12.1.1
+  shared_preferences: ^2.5.5
+  flutter_perf_monitor: ^0.3.1
+  web: ^1.1.1
+  uuid: ^4.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.7
+  sqlite3: ^3.5.1
+
+flutter_native_splash:
+  color: "#EBF6EC"
+  image: "assets/images/hodhd_ai.png"
+
+flutter_launcher_icons:
+  ios: true
+  android: true
+
+  image_path_ios: "assets/images/hodhd_ai.png"
+  image_path_android: "assets/images/hodhd_ai.png"
+
+  adaptive_icon_background: "#191919"
+  remove_alpha_ios: true
+
+  windows:
+    generate: true
+    image_path: "assets/images/hodhd_ai.png"
+    icon_size: 48
+
+  web:
+    generate: true
+    image_path: "assets/images/hodhd_ai.png"
+    background_color: "#hexcode"
+    theme_color: "#hexcode"
+
+flutter:
+  uses-material-design: true
+  assets:
+   - assets/images/
+   - assets/images/tags/
+   - assets/models/

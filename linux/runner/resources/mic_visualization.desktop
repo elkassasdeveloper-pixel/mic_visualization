@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Mic Visualization
+Comment=Mic Visualization
+Exec=mic_visualization
+Icon=hodhd_ai
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;
+StartupWMClass=mic_visualization
