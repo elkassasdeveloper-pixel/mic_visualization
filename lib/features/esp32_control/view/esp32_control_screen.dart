@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:esp_smartconfig/esp_smartconfig.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
@@ -28,6 +30,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   static const String _allDevices = ''; // dropdown value for "All devices"
   List<String> _deviceMacs = []; // MACs (no colons) currently connected
   String _selectedMac = _allDevices;
+  Map<String, String> _deviceNames = {}; // MAC (no colons) -> display name
 
   bool _serviceReady = false;
   bool _busy = false; // true while starting/stopping the service
@@ -53,6 +56,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     _requestPermissions();
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     _loadLocalIps();
+    _loadDeviceNames();
     _syncRunningState();
   }
 
@@ -346,7 +350,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       'target': target,
     });
 
-    final where = target == null ? 'all devices' : _formatMac(_selectedMac);
+    final where = target == null ? 'all devices' : _deviceLabel(_selectedMac);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Sent "$colorName" to $where'),
@@ -360,6 +364,89 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     return [for (var i = 0; i < 12; i += 2) mac.substring(i, i + 2)].join(':');
   }
 
+  // ---- device names (value = MAC, label = friendly name) -----------------
+
+  Future<void> _loadDeviceNames() async {
+    final raw = await FlutterForegroundTask.getData<String>(key: 'deviceNames');
+    if (raw == null) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      if (mounted) {
+        setState(() {
+          _deviceNames = map.map((k, v) => MapEntry(k, v.toString()));
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveDeviceNames() async {
+    await FlutterForegroundTask.saveData(
+      key: 'deviceNames',
+      value: jsonEncode(_deviceNames),
+    );
+  }
+
+  /// Friendly name for a MAC. Falls back to "Mic XXXX" (last 4 hex digits)
+  /// until the user gives the device a name.
+  String _deviceLabel(String mac) {
+    final custom = _deviceNames[mac];
+    if (custom != null && custom.isNotEmpty) return custom;
+    final tail = mac.length >= 4 ? mac.substring(mac.length - 4) : mac;
+    return 'Mic $tail';
+  }
+
+  /// Label for an MQTT client id such as "esp32-AABBCCDDEEFF".
+  String _clientLabel(String clientId) {
+    if (clientId.startsWith(_clientIdPrefix)) {
+      return _deviceLabel(clientId.substring(_clientIdPrefix.length));
+    }
+    return clientId;
+  }
+
+  Future<void> _renameSelectedDevice() async {
+    final mac = _selectedMac;
+    if (mac == _allDevices) return;
+
+    final controller = TextEditingController(text: _deviceNames[mac] ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Name for ${_formatMac(mac)}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 30,
+          decoration: InputDecoration(
+            hintText: _deviceLabel(mac),
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (name == null || !mounted) return; // cancelled
+    setState(() {
+      final trimmed = name.trim();
+      if (trimmed.isEmpty) {
+        _deviceNames.remove(mac); // back to the default "Mic XXXX"
+      } else {
+        _deviceNames[mac] = trimmed;
+      }
+    });
+    await _saveDeviceNames();
+  }
+
   Widget _buildDeviceSelector() {
     // Keep the selected device in the list even if it goes offline, so the
     // dropdown never ends up with a value that has no matching item.
@@ -367,42 +454,90 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       ..._deviceMacs,
       if (_selectedMac != _allDevices) _selectedMac,
     }.toList()
-      ..sort();
+      ..sort((a, b) =>
+          _deviceLabel(a).toLowerCase().compareTo(_deviceLabel(b).toLowerCase()));
+    final values = <String>[_allDevices, ...macs];
 
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: 'Target device',
-        helperText: _deviceMacs.isEmpty
-            ? 'No ESP32 connected yet'
-            : 'Colors and telemetry are limited to the selected device',
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          isExpanded: true,
-          value: _selectedMac,
-          onChanged: _running
-              ? (value) => setState(() => _selectedMac = value ?? _allDevices)
-              : null,
-          items: [
-            const DropdownMenuItem(
-              value: _allDevices,
-              child: Text('All devices'),
+    String macLine(String mac) => _deviceMacs.contains(mac)
+        ? _formatMac(mac)
+        : '${_formatMac(mac)} (offline)';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Target device',
+              helperText: _deviceMacs.isEmpty
+                  ? 'No ESP32 connected yet'
+                  : 'Colors and telemetry are limited to the selected device',
+              border: const OutlineInputBorder(),
+              contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             ),
-            for (final mac in macs)
-              DropdownMenuItem(
-                value: mac,
-                child: Text(
-                  _deviceMacs.contains(mac)
-                      ? _formatMac(mac)
-                      : '${_formatMac(mac)} (offline)',
-                  style: const TextStyle(fontFamily: 'monospace'),
-                ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: _selectedMac,
+                onChanged: _running
+                    ? (value) =>
+                    setState(() => _selectedMac = value ?? _allDevices)
+                    : null,
+                // What the closed dropdown shows (single line).
+                selectedItemBuilder: (context) => [
+                  for (final v in values)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        v == _allDevices
+                            ? 'All devices'
+                            : '${_deviceLabel(v)}  ·  ${_formatMac(v)}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                // What the open list shows: name + MAC underneath.
+                items: [
+                  for (final v in values)
+                    DropdownMenuItem<String>(
+                      value: v, // the MAC (no colons); '' = all devices
+                      child: v == _allDevices
+                          ? const Text('All devices')
+                          : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(_deviceLabel(v),
+                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            macLine(v),
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(fontFamily: 'monospace'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
-      ),
+        const SizedBox(width: 8),
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: IconButton.filledTonal(
+            icon: const Icon(Icons.edit),
+            tooltip: 'Rename selected device',
+            onPressed:
+            _selectedMac == _allDevices ? null : _renameSelectedDevice,
+          ),
+        ),
+      ],
     );
   }
 
@@ -424,7 +559,12 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => SmartConfigScreen(targetMac: _selectedMac),
+                  builder: (_) => SmartConfigScreen(
+                    targetMac: _selectedMac,
+                    targetName: _selectedMac == _allDevices
+                        ? ''
+                        : _deviceLabel(_selectedMac),
+                  ),
                 ),
               );
             },
@@ -479,7 +619,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
                     dense: true,
                     title: Text(msg.payload, style: const TextStyle(fontFamily: 'monospace')),
                     subtitle: Text(
-                        '${msg.topic} (${msg.fromClientId}) · ${msg.receivedAt.toIso8601String()}'),
+                        '${msg.topic} (${_clientLabel(msg.fromClientId)}) · ${msg.receivedAt.toIso8601String()}'),
                   );
                 },
               ),
@@ -601,7 +741,10 @@ class SmartConfigScreen extends StatefulWidget {
   /// screen. Empty string means "all devices".
   final String targetMac;
 
-  const SmartConfigScreen({super.key, this.targetMac = ''});
+  /// Friendly name of that device (empty when targeting all devices).
+  final String targetName;
+
+  const SmartConfigScreen({super.key, this.targetMac = '', this.targetName = ''});
 
   @override
   State<SmartConfigScreen> createState() => _SmartConfigScreenState();
@@ -609,7 +752,7 @@ class SmartConfigScreen extends StatefulWidget {
 
 class _SmartConfigScreenState extends State<SmartConfigScreen> {
   final _ssidController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _passwordController = TextEditingController(text: "SayedNimer@2021@1442");
   final _networkInfo = NetworkInfo();
 
   Provisioner? _provisioner;
@@ -637,8 +780,12 @@ class _SmartConfigScreenState extends State<SmartConfigScreen> {
       final ssid = await _networkInfo.getWifiName();
       if (ssid != null) {
         _ssidController.text = ssid.replaceAll('"', '');
+      }else {
+        _ssidController.text = "EngSayedNimer";
       }
-    } catch (_) {}
+    } catch (_) {
+      _ssidController.text = "EngSayedNimer";
+    }
   }
 
   Future<void> _startProvisioning() async {
@@ -697,7 +844,7 @@ class _SmartConfigScreenState extends State<SmartConfigScreen> {
     widget.targetMac.isEmpty ? null : 'esp32-${widget.targetMac}';
     final label = target == null
         ? 'ALL connected devices'
-        : _prettyMac(widget.targetMac);
+        : '${widget.targetName} (${_prettyMac(widget.targetMac)})';
 
     final confirmed = await showDialog<bool>(
       context: context,

@@ -40,100 +40,75 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final classificationRepository = SqfliteClassificationRepository();
 
-    return Scaffold(
-      drawer: _buildDrawer(context),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: HomeBackground(
-          child: MultiBlocProvider(
-            providers: [
-              BlocProvider(
-                create: (context) => HomeCubit(
-                  RecordMicDeviceRepository(),
-                  Platform.isLinux ? ParecMicRecordingRepository() : RecordBackedMicRecordingRepository(),
-                  taggingService,
-                  realtimeRepository,
-                  classificationRepository,
-                  CloudApiService(),
-                  settingsRepository,
-                  slotTokens,
-                  fugoTokens,
-                ),
+    // The providers wrap the whole Scaffold (not just the body) so the drawer
+    // can also reach HomeCubit / HomeLayoutCubit, which Settings needs.
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider(
+          create: (context) => HomeCubit(
+            RecordMicDeviceRepository(),
+            Platform.isLinux ? ParecMicRecordingRepository() : RecordBackedMicRecordingRepository(),
+            taggingService,
+            realtimeRepository,
+            classificationRepository,
+            CloudApiService(),
+            settingsRepository,
+            slotTokens,
+            fugoTokens,
+          ),
+        ),
+        BlocProvider(create: (_) => HomeLayoutCubit(settingsRepository)),
+      ],
+      child: Builder(
+        builder: (context) => Scaffold(
+          drawer: _buildDrawer(context, classificationRepository),
+          body: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: HomeBackground(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final containerSize = Size(constraints.maxWidth, constraints.maxHeight);
+
+                  return BlocBuilder<HomeCubit, HomeState>(
+                    builder: (context, state) {
+                      final cubit = context.read<HomeCubit>();
+                      final layoutCubit = context.read<HomeLayoutCubit>();
+
+                      return BlocBuilder<HomeLayoutCubit, HomeLayoutState>(
+                        builder: (context, layout) {
+                          return Stack(
+                            children: [
+                              for (final mic in state.registeredMics)
+                                DraggableMicButton(
+                                  isActive: state.isActive(mic.id),
+                                  isRecording: state.isRecording(mic.id),
+                                  tag: state.tagFor(mic.id),
+                                  label: state.labelFor(mic.id),
+                                  onTap: () => cubit.toggleRecording(mic.id),
+                                  fractionalPosition: layout.positionFor(mic.id),
+                                  containerSize: containerSize,
+                                  onPositionChanged: (pos) => layoutCubit.updatePosition(mic.id, pos),
+                                  onDragEnd: layoutCubit.commitPositions,
+                                ),
+                              Positioned(
+                                top: 0,
+                                left: 0,
+                                child: Builder(
+                                  builder: (ctx) => IconButton(
+                                    icon: const Icon(Icons.menu),
+                                    tooltip: 'Menu',
+                                    onPressed: () => Scaffold.of(ctx).openDrawer(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
               ),
-              BlocProvider(create: (_) => HomeLayoutCubit(settingsRepository)),
-            ],
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final containerSize = Size(constraints.maxWidth, constraints.maxHeight);
-
-                return BlocBuilder<HomeCubit, HomeState>(
-                  builder: (context, state) {
-                    final cubit = context.read<HomeCubit>();
-                    final layoutCubit = context.read<HomeLayoutCubit>();
-
-                    return BlocBuilder<HomeLayoutCubit, HomeLayoutState>(
-                      builder: (context, layout) {
-                        return Stack(
-                          children: [
-                            for (final mic in state.registeredMics)
-                              DraggableMicButton(
-                                isActive: state.isActive(mic.id),
-                                isRecording: state.isRecording(mic.id),
-                                tag: state.tagFor(mic.id),
-                                label: state.labelFor(mic.id),
-                                onTap: () => cubit.toggleRecording(mic.id),
-                                fractionalPosition: layout.positionFor(mic.id),
-                                containerSize: containerSize,
-                                onPositionChanged: (pos) => layoutCubit.updatePosition(mic.id, pos),
-                                onDragEnd: layoutCubit.commitPositions,
-                              ),
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              child: Builder(
-                                builder: (ctx) => IconButton(
-                                  icon: const Icon(Icons.menu),
-                                  tooltip: 'Menu',
-                                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 0,
-                              left: 0,
-                              right: 0,
-                              child: Align(
-                                alignment: Alignment.topCenter,
-                                child: IconButton(
-                                  icon: const Icon(Icons.settings),
-                                  tooltip: 'Settings',
-                                  onPressed: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => MultiBlocProvider(
-                                          providers: [
-                                            BlocProvider.value(value: cubit),
-                                            BlocProvider.value(value: layoutCubit),
-                                          ],
-                                          child: SettingsScreen(
-                                            classificationRepository: classificationRepository,
-                                            adminToken: adminToken,
-                                            settingsRepository: settingsRepository,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                );
-              },
             ),
           ),
         ),
@@ -145,34 +120,62 @@ class HomeScreen extends StatelessWidget {
   /// (foreground service + SmartConfig), so the entry is hidden elsewhere.
   bool get _esp32Supported => !kIsWeb && Platform.isAndroid;
 
-  Widget _buildDrawer(BuildContext context) {
+  Widget _buildDrawer(
+      BuildContext context,
+      SqfliteClassificationRepository classificationRepository,
+      ) {
     return Drawer(
-      child: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const DrawerHeader(
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: Text('Menu', style: TextStyle(fontSize: 24)),
-              ),
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          ListTile(
+            title: Text('Menu', style: Theme.of(context).textTheme.headlineLarge),
+          ),
+          const Divider(thickness: 1,),
+          if (_esp32Supported)
+            ListTile(
+              titleTextStyle: Theme.of(context).textTheme.titleMedium,
+              subtitleTextStyle: Theme.of(context).textTheme.bodyMedium,
+              leading: const Icon(Icons.lightbulb_outline),
+              title: const Text('ESP32 LED Control'),
+              subtitle: const Text('MQTT broker & WiFi setup'),
+              onTap: () {
+                Navigator.of(context).pop(); // close the drawer
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const Esp32ControlScreen(),
+                  ),
+                );
+              },
             ),
-            if (_esp32Supported)
-              ListTile(
-                leading: const Icon(Icons.lightbulb_outline),
-                title: const Text('ESP32 LED Control'),
-                subtitle: const Text('MQTT broker & WiFi setup'),
-                onTap: () {
-                  Navigator.of(context).pop(); // close the drawer
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const Esp32ControlScreen(),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Settings'),
+            titleTextStyle: Theme.of(context).textTheme.titleMedium,
+            onTap: () {
+              // Read the cubits first, then close the drawer and navigate.
+              final cubit = context.read<HomeCubit>();
+              final layoutCubit = context.read<HomeLayoutCubit>();
+
+              Navigator.of(context).pop(); // close the drawer
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => MultiBlocProvider(
+                    providers: [
+                      BlocProvider.value(value: cubit),
+                      BlocProvider.value(value: layoutCubit),
+                    ],
+                    child: SettingsScreen(
+                      classificationRepository: classificationRepository,
+                      adminToken: adminToken,
+                      settingsRepository: settingsRepository,
                     ),
-                  );
-                },
-              ),
-          ],
-        ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

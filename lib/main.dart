@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_perf_monitor/flutter_perf_monitor.dart';
@@ -24,10 +23,6 @@ void main() async{
   }
   initializeDatabaseFfi();
   FlutterPerfMonitor.initialize();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
   final settingsRepository = await SettingsRepository.create();
   ErrorWidget.builder = (FlutterErrorDetails details) {
     return CustomErrorWidget(details: details);
@@ -46,27 +41,29 @@ class MyApp extends StatelessWidget {
       create: (_) => ThemeCubit(settingsRepository),
       child: BlocBuilder<ThemeCubit, ThemeState>(
         builder: (context, themeState) {
-          return MaterialApp(
-            debugShowCheckedModeBanner: false,
-            themeMode: themeState.themeMode,
-            theme: ThemeData.light(),
-            darkTheme: ThemeData.dark(),
-            builder: (context, child) {
-              return MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  textScaler: TextScaler.linear(themeState.fontScale),
-                ),
-                child: child!,
-              );
-            },
-            home: BlocProvider(
-              create: (context) =>
-                  StartupCubit(
-                      ApiAuthRepository(AuthApiService()),
-                      CentrifugeRealtimeRepository(),
-                      settingsRepository
+          return SafeArea(
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              themeMode: themeState.themeMode,
+              theme: ThemeData.light(),
+              darkTheme: ThemeData.dark(),
+              builder: (context, child) {
+                return MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: TextScaler.linear(themeState.fontScale),
                   ),
-              child: StartupScreen(settingsRepository: settingsRepository,),
+                  child: child!,
+                );
+              },
+              home: BlocProvider(
+                create: (context) =>
+                    StartupCubit(
+                        ApiAuthRepository(AuthApiService()),
+                        CentrifugeRealtimeRepository(),
+                        settingsRepository
+                    ),
+                child: StartupScreen(settingsRepository: settingsRepository,),
+              ),
             ),
           );
         },
