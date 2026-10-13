@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'mini_mqtt_broker.dart';
+import 'mini_websocket_server.dart';
 
 @pragma('vm:entry-point')
 void startBrokerTaskCallback() {
@@ -11,7 +12,8 @@ void startBrokerTaskCallback() {
 }
 
 class BrokerTaskHandler extends TaskHandler {
-  final MiniMqttBroker _broker = MiniMqttBroker();
+  final MiniMqttBroker _mqttBroker = MiniMqttBroker();
+  final MiniWebSocketServer _wsServer = MiniWebSocketServer();
 
   StreamSubscription<String>? _logSub;
   StreamSubscription<int>? _clientCountSub;
@@ -20,6 +22,7 @@ class BrokerTaskHandler extends TaskHandler {
 
   int _port = 1883;
   String _colorTopic = 'esp32/led/set';
+  bool _useWebSocket = false;
 
   bool _started = false;
   bool _starting = false; // guards against two setConfig messages racing
@@ -32,38 +35,7 @@ class BrokerTaskHandler extends TaskHandler {
       ) async {
     debugPrint('[BrokerTaskHandler] onStart');
 
-    _logSub = _broker.logStream.listen((msg) {
-      debugPrint('[Broker] $msg');
-      _lastLog = msg;
-
-      FlutterForegroundTask.sendDataToMain({
-        'type': 'log',
-        'value': msg,
-      });
-    });
-
-    _clientCountSub = _broker.clientCountStream.listen((count) {
-      FlutterForegroundTask.sendDataToMain({
-        'type': 'clientCount',
-        'value': count,
-      });
-    });
-
-    _clientIdsSub = _broker.clientIdsStream.listen((ids) {
-      FlutterForegroundTask.sendDataToMain({
-        'type': 'clients',
-        'value': ids,
-      });
-    });
-
-    // Raw payload of every PUBLISH the broker receives (audio chunks).
-    _audioSub = _broker.audioStream.listen((chunk) {
-      FlutterForegroundTask.sendDataToMain({
-        'type': 'audio',
-        'value': chunk.payload,
-        'clientId': chunk.clientId,
-      });
-    });
+    _setupSubscriptions();
 
     debugPrint('[BrokerTaskHandler] Ready');
 
@@ -72,52 +44,110 @@ class BrokerTaskHandler extends TaskHandler {
     });
   }
 
+  void _setupSubscriptions() {
+    _cancelSubscriptions();
+
+    if (_useWebSocket) {
+      _logSub = _wsServer.logStream.listen(_onLog);
+      _clientCountSub = _wsServer.clientCountStream.listen(_onClientCount);
+      _clientIdsSub = _wsServer.clientIdsStream.listen(_onClientIds);
+      _audioSub = _wsServer.audioStream.listen(_onAudioChunk);
+    } else {
+      _logSub = _mqttBroker.logStream.listen(_onLog);
+      _clientCountSub = _mqttBroker.clientCountStream.listen(_onClientCount);
+      _clientIdsSub = _mqttBroker.clientIdsStream.listen(_onClientIds);
+      _audioSub = _mqttBroker.audioStream.listen(_onAudioChunk);
+    }
+  }
+
+  void _cancelSubscriptions() {
+    _logSub?.cancel();
+    _clientCountSub?.cancel();
+    _clientIdsSub?.cancel();
+    _audioSub?.cancel();
+  }
+
+  void _onLog(String msg) {
+    debugPrint('[Server Log] $msg');
+    _lastLog = msg;
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'log',
+      'value': msg,
+    });
+  }
+
+  void _onClientCount(int count) {
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'clientCount',
+      'value': count,
+    });
+  }
+
+  void _onClientIds(List<String> ids) {
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'clients',
+      'value': ids,
+    });
+  }
+
+  void _onAudioChunk(MqttAudioChunk chunk) {
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'audio',
+      'value': chunk.payload,
+      'clientId': chunk.clientId,
+    });
+  }
+
   Future<void> _startBroker() async {
     if (_started || _starting) {
-      debugPrint('[BrokerTaskHandler] Broker already started/starting');
+      debugPrint('[BrokerTaskHandler] Server already started/starting');
       if (_started) _sendStatus();
       return;
     }
     _starting = true;
 
     try {
-      debugPrint(
-        '[BrokerTaskHandler] Starting broker on port $_port...',
-      );
+      _setupSubscriptions();
 
-      await _broker.start(_port);
+      if (_useWebSocket) {
+        debugPrint('[BrokerTaskHandler] Starting WebSocket server on port $_port...');
+        await _wsServer.start(_port);
+      } else {
+        debugPrint('[BrokerTaskHandler] Starting MQTT broker on port $_port...');
+        await _mqttBroker.start(_port);
+      }
 
       _started = true;
       _starting = false;
 
-      debugPrint(
-        '[BrokerTaskHandler] Broker started successfully on $_port',
-      );
+      if (_lastLog.isEmpty) {
+        _lastLog = '${_useWebSocket ? 'WebSocket server' : 'MQTT broker'} listening on port $_port';
+      }
 
-      FlutterForegroundTask.sendDataToMain({
-        'type': 'running',
-        'value': true,
-      });
+      debugPrint('[BrokerTaskHandler] Started successfully on port $_port');
+
+      _sendStatus();
     } catch (e, stackTrace) {
       _starting = false;
-      debugPrint(
-        '[BrokerTaskHandler] FAILED to start broker: $e',
-      );
-
+      debugPrint('[BrokerTaskHandler] FAILED to start server: $e');
       debugPrint(stackTrace.toString());
 
       FlutterForegroundTask.sendDataToMain({
         'type': 'error',
-        'value': 'Failed to start broker: $e',
+        'value': 'Failed to start server: $e',
       });
     }
   }
 
   Future<void> _stopBroker() async {
-    await _broker.stop(); // also emits clientCount = 0 and an empty client list
+    if (_useWebSocket) {
+      await _wsServer.stop();
+    } else {
+      await _mqttBroker.stop();
+    }
     _started = false;
     _starting = false;
-    _lastLog = '';
+    _lastLog = 'Server stopped';
 
     FlutterForegroundTask.sendDataToMain({
       'type': 'running',
@@ -129,25 +159,33 @@ class BrokerTaskHandler extends TaskHandler {
     });
   }
 
-  /// Reports the current broker state so a freshly opened UI can sync up.
   void _sendStatus() {
+    final count = _useWebSocket
+        ? _wsServer.connectedClientCount
+        : _mqttBroker.connectedClientCount;
+    final ids = _useWebSocket
+        ? _wsServer.connectedClientIds
+        : _mqttBroker.connectedClientIds;
+
     FlutterForegroundTask.sendDataToMain({
       'type': 'running',
       'value': _started,
     });
     FlutterForegroundTask.sendDataToMain({
       'type': 'clientCount',
-      'value': _broker.connectedClientCount,
+      'value': count,
     });
     FlutterForegroundTask.sendDataToMain({
       'type': 'clients',
-      'value': _broker.connectedClientIds,
+      'value': ids,
     });
     FlutterForegroundTask.sendDataToMain({
       'type': 'log',
       'value': _lastLog.isNotEmpty
           ? _lastLog
-          : (_started ? 'Broker listening on port $_port' : 'Broker stopped'),
+          : (_started
+          ? '${_useWebSocket ? 'WebSocket' : 'MQTT'} listening on port $_port'
+          : 'Server stopped'),
     });
   }
 
@@ -162,16 +200,15 @@ class BrokerTaskHandler extends TaskHandler {
 
     switch (data['type']) {
       case 'setConfig':
-        _port = data['port'] as int? ?? 1883;
-        _colorTopic =
-            data['colorTopic'] as String? ?? 'esp32/led/set';
+        _port = data['port'] as int? ?? (_useWebSocket ? 8080 : 1883);
+        _colorTopic = data['colorTopic'] as String? ?? 'esp32/led/set';
+        _useWebSocket = data['useWebSocket'] as bool? ?? false;
 
         debugPrint(
           '[BrokerTaskHandler] Config received: '
-              'port=$_port, colorTopic=$_colorTopic',
+              'port=$_port, colorTopic=$_colorTopic, useWebSocket=$_useWebSocket',
         );
 
-        // Start AFTER receiving the configuration.
         _startBroker();
         break;
 
@@ -181,51 +218,39 @@ class BrokerTaskHandler extends TaskHandler {
 
       case 'sendColor':
         final color = data['value'] as String?;
-        // Optional MQTT client ID (e.g. "esp32-AABBCCDDEEFF"). null = all.
         final target = data['target'] as String?;
 
         if (color != null) {
-          debugPrint(
-            '[BrokerTaskHandler] Publishing color: $color',
-          );
-
-          _broker.publishString(
-            _colorTopic,
-            color,
-            targetClientId: target,
-          );
+          debugPrint('[BrokerTaskHandler] Publishing color: $color');
+          if (_useWebSocket) {
+            _wsServer.sendString(color, targetClientId: target);
+          } else {
+            _mqttBroker.publishString(_colorTopic, color, targetClientId: target);
+          }
         }
         break;
 
       case 'sendCommand':
-      // Plain-text command (e.g. "RESET") published on the same topic the
-      // ESP32s subscribe to, optionally to a single client ID.
         final command = data['value'] as String?;
         final cmdTarget = data['target'] as String?;
 
         if (command != null) {
-          debugPrint('[BrokerTaskHandler] Publishing command: $command '
-              '(target: ${cmdTarget ?? 'all'})');
-          _broker.publishString(
-            _colorTopic,
-            command,
-            targetClientId: cmdTarget,
-          );
+          debugPrint('[BrokerTaskHandler] Publishing command: $command');
+          if (_useWebSocket) {
+            _wsServer.sendString(command, targetClientId: cmdTarget);
+          } else {
+            _mqttBroker.publishString(_colorTopic, command, targetClientId: cmdTarget);
+          }
         }
         break;
 
       case 'stop':
         debugPrint('[BrokerTaskHandler] Stop requested');
-
-        // Close sockets and release the port first; the UI then stops the
-        // service itself once this has had time to run.
         _stopBroker();
         break;
 
       default:
-        debugPrint(
-          '[BrokerTaskHandler] Unknown command: ${data['type']}',
-        );
+        debugPrint('[BrokerTaskHandler] Unknown command: ${data['type']}');
     }
   }
 
@@ -237,19 +262,14 @@ class BrokerTaskHandler extends TaskHandler {
       DateTime timestamp,
       bool isTimeout,
       ) async {
-    debugPrint(
-      '[BrokerTaskHandler] onDestroy '
-          '(isTimeout=$isTimeout)',
-    );
+    debugPrint('[BrokerTaskHandler] onDestroy');
 
-    await _logSub?.cancel();
-    await _clientCountSub?.cancel();
-    await _clientIdsSub?.cancel();
-    await _audioSub?.cancel();
+    _cancelSubscriptions();
+    await _mqttBroker.stop();
+    _mqttBroker.dispose();
+    await _wsServer.stop();
+    _wsServer.dispose();
 
-    await _broker.stop();
-    _broker.dispose();
-
-    debugPrint('[BrokerTaskHandler] Broker stopped from onDestroy');
+    debugPrint('[BrokerTaskHandler] Stopped from onDestroy');
   }
 }

@@ -22,9 +22,7 @@ void main() {
       const slot = 'esp32-test';
       await repo.startRecording(slot, null);
 
-      List<double>? receivedWindow;
       final sub = repo.windowsFor(slot).listen((window) {
-        receivedWindow = window;
       });
 
       // Prepare 15,600 PCM16 samples (31,200 bytes)
@@ -38,14 +36,11 @@ void main() {
       }
 
       // Feed half the chunk, then the second half
-      final halfLength = pcmBytes.length ~/ 2;
       repo.windowsFor(slot); // ensure stream controller initialized
 
       // Simulating MQTT audio bytes
       // We directly invoke windowsFor and feeding logic via repository
       // Sending chunks
-      final chunk1 = pcmBytes.sublist(0, halfLength);
-      final chunk2 = pcmBytes.sublist(halfLength);
 
       // Using reflection-like testing via internal handler method or public behavior
       // We can send simulated task data

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:mic_visualization/data/local/settings_repository.dart';
 import 'package:mic_visualization/data/models/classification_record.dart';
 import 'package:mic_visualization/data/models/login_response.dart';
@@ -33,6 +35,7 @@ class HomeCubit extends Cubit<HomeState> {
         minConfidence: _settings.minConfidence,
         publishEnabled: _settings.publishEnabled,
         postToCloudEnabled: _settings.postToCloudEnabled,
+        useWebSocket: _settings.useWebSocket,
       )) {
     _deviceSubscription = _deviceRepository
         .watchConnectedDevices(() => state.registeredMics.map((m) => m.id).toList())
@@ -169,6 +172,24 @@ class HomeCubit extends Cubit<HomeState> {
     _settings.setPostToCloudEnabled(value);
   }
 
+  void setUseWebSocket(bool value) async {
+    emit(state.copyWith(useWebSocket: value));
+    await _settings.setUseWebSocket(value);
+
+    if (!kIsWeb && Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+      FlutterForegroundTask.sendDataToTask({
+        'type': 'sendCommand',
+        'value': value ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
+      });
+      FlutterForegroundTask.sendDataToTask({
+        'type': 'setConfig',
+        'port': value ? 8080 : 1883,
+        'colorTopic': 'esp32/led/set',
+        'useWebSocket': value,
+      });
+    }
+  }
+
   Future<void> registerMic(RegisteredMic mic, LoginResponse micLogin) async {
     final updated = [...state.registeredMics, mic];
     emit(state.copyWith(registeredMics: updated));
@@ -210,6 +231,7 @@ class HomeState {
     this.minConfidence = 0.5,
     this.publishEnabled = true,
     this.postToCloudEnabled = false,
+    this.useWebSocket = false,
   });
 
   final List<RegisteredMic> registeredMics;
@@ -220,6 +242,7 @@ class HomeState {
   final double minConfidence;
   final bool publishEnabled;
   final bool postToCloudEnabled;
+  final bool useWebSocket;
 
   bool isActive(String slot) => connectedDevices.contains(slot);
   bool isRecording(String slot) => recordingSlots.contains(slot);
@@ -235,6 +258,7 @@ class HomeState {
     double? minConfidence,
     bool? publishEnabled,
     bool? postToCloudEnabled,
+    bool? useWebSocket,
   }) {
     return HomeState(
       registeredMics: registeredMics ?? this.registeredMics,
@@ -245,6 +269,7 @@ class HomeState {
       minConfidence: minConfidence ?? this.minConfidence,
       publishEnabled: publishEnabled ?? this.publishEnabled,
       postToCloudEnabled: postToCloudEnabled ?? this.postToCloudEnabled,
+      useWebSocket: useWebSocket ?? this.useWebSocket,
     );
   }
 }

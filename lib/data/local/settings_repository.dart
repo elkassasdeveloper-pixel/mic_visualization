@@ -51,6 +51,9 @@ class SettingsRepository {
   bool get postToCloudEnabled => _prefs.getBool('postToCloudEnabled') ?? false;
   Future<void> setPostToCloudEnabled(bool value) => _prefs.setBool('postToCloudEnabled', value);
 
+  bool get useWebSocket => _prefs.getBool('useWebSocket') ?? false;
+  Future<void> setUseWebSocket(bool value) => _prefs.setBool('useWebSocket', value);
+
   // Layout positions (slot -> [dx, dy] fractional)
   Map<String, Offset>? _decodePositions(String? json) {
     if (json == null) return null;

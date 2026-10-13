@@ -6,6 +6,7 @@ import 'package:esp_smartconfig/esp_smartconfig.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
+import 'package:mic_visualization/data/local/settings_repository.dart';
 import 'package:mic_visualization/data/services/broker_task_handler.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -24,6 +25,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   String _lastLog = '';
   int _clientCount = 0;
   bool _running = false;
+  bool _useWebSocket = false;
   List<String> _localIps = [];
 
   final List<_TelemetryMessage> _messages = [];
@@ -63,6 +65,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     _initForegroundTask();
     _requestPermissions();
     FlutterForegroundTask.addTaskDataCallback(_onTaskData);
+    _loadSettings();
     _loadLocalIps();
     _loadDeviceNames();
     _syncRunningState();
@@ -76,6 +79,16 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     _portController.dispose();
     _topicController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    final settings = await SettingsRepository.create();
+    if (mounted) {
+      setState(() {
+        _useWebSocket = settings.useWebSocket;
+        _portController.text = _useWebSocket ? '8080' : '1883';
+      });
+    }
   }
 
   Future<void> _syncRunningState() async {
@@ -137,8 +150,11 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
 
       case 'log':
         if (mounted) {
+          final logValue = data['value'] as String? ?? '';
           setState(() {
-            _lastLog = data['value'] as String;
+            if (logValue.isNotEmpty) {
+              _lastLog = logValue;
+            }
           });
         }
         break;
@@ -284,25 +300,31 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     setState(() => _visualizerValues = newBarHeights);
   }
 
-  void _sendBrokerConfig() {
+  Future<void> _sendBrokerConfig() async {
     if (!_serviceReady) {
       debugPrint('[UI] Task is not ready yet');
       return;
     }
 
+    final defaultPort = _useWebSocket ? 8080 : 1883;
     final port =
-        int.tryParse(_portController.text.trim()) ?? 1883;
+        int.tryParse(_portController.text.trim()) ?? defaultPort;
 
     final colorTopic = _topicController.text.trim();
 
     debugPrint('[UI] Sending broker configuration...');
-    debugPrint('[UI] port=$port');
-    debugPrint('[UI] colorTopic=$colorTopic');
+    debugPrint('[UI] port=$port, useWebSocket=$_useWebSocket');
 
     FlutterForegroundTask.sendDataToTask({
       'type': 'setConfig',
       'port': port,
       'colorTopic': colorTopic,
+      'useWebSocket': _useWebSocket,
+    });
+
+    FlutterForegroundTask.sendDataToTask({
+      'type': 'sendCommand',
+      'value': _useWebSocket ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
     });
 
     debugPrint('[UI] Configuration sent');
@@ -339,8 +361,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       final result = await FlutterForegroundTask.stopService();
       debugPrint('[UI] stopService result: $result');
 
-      // 3) Wait until it is really gone (max ~5 s), otherwise an immediate
-      //    restart would hit "service already started" on a dying service.
       for (var i = 0; i < 25; i++) {
         if (!await FlutterForegroundTask.isRunningService) break;
         await Future.delayed(const Duration(milliseconds: 200));
@@ -352,26 +372,32 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
           _clientCount = 0;
           _deviceMacs = [];
           _visualizerValues = List.filled(15, 0.1);
-          _lastLog = 'Broker stopped';
+          _lastLog = 'Server stopped';
         });
       }
       return;
     }
 
+    final defaultPort = _useWebSocket ? 8080 : 1883;
     final port =
-        int.tryParse(_portController.text.trim()) ?? 1883;
+        int.tryParse(_portController.text.trim()) ?? defaultPort;
 
     final colorTopic = _topicController.text.trim();
 
-    debugPrint('[UI] Starting broker...');
-    debugPrint('[UI] port=$port');
-    debugPrint('[UI] colorTopic=$colorTopic');
+    if (mounted) {
+      setState(() {
+        _lastLog = 'Starting ${_useWebSocket ? 'WebSocket' : 'MQTT'} server...';
+      });
+    }
+
+    final settings = await SettingsRepository.create();
+    await settings.setUseWebSocket(_useWebSocket);
 
     try {
       final result = await FlutterForegroundTask.startService(
         serviceId: 256,
-        notificationTitle: 'ESP32 MQTT Broker',
-        notificationText: 'Starting broker on port $port...',
+        notificationTitle: 'ESP32 Audio Service',
+        notificationText: 'Starting server on port $port...',
         callback: startBrokerTaskCallback,
       );
 
@@ -380,14 +406,9 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       if (result is ServiceRequestFailure) {
         debugPrint('[UI] Service failed: ${result.error}');
 
-        // Service is already alive (e.g. started earlier / screen was
-        // re-opened): just re-attach the UI instead of showing "Start".
         if (result.error.toString().contains('ServiceAlreadyStarted')) {
-          // A service is alive. Ask it to start the broker and wait for it to
-          // confirm - do NOT assume it is running, it might be a leftover
-          // that is shutting down.
           _serviceReady = true;
-          _sendBrokerConfig();
+          await _sendBrokerConfig();
           FlutterForegroundTask.sendDataToTask({'type': 'getStatus'});
 
           for (var i = 0; i < 15 && !_running && mounted; i++) {
@@ -398,7 +419,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
             await FlutterForegroundTask.stopService();
             setState(() {
               _lastLog = 'Service was not responding and was stopped - '
-                  'tap Start Broker again';
+                  'tap Start again';
             });
           }
           return;
@@ -413,15 +434,20 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
         return;
       }
 
-// Only send configuration if the service actually started.
       if (mounted) setState(() => _running = true);
       FlutterForegroundTask.sendDataToTask({
         'type': 'setConfig',
         'port': port,
         'colorTopic': colorTopic,
+        'useWebSocket': _useWebSocket,
       });
 
-      debugPrint('[UI] Configuration sent to broker task');
+      FlutterForegroundTask.sendDataToTask({
+        'type': 'sendCommand',
+        'value': _useWebSocket ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
+      });
+
+      debugPrint('[UI] Configuration sent to server task');
     } catch (e, stackTrace) {
       debugPrint('[UI] startService FAILED: $e');
       debugPrint(stackTrace.toString());
@@ -643,7 +669,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ESP32 LED Control (Broker)'),
+        title: const Text('ESP32 LED Control'),
         actions: [
           IconButton(
             icon: const Icon(Icons.wifi),
@@ -670,7 +696,8 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
           children: [
             _buildBrokerCard(_running),
             const SizedBox(height: 12),
-            Text('Status: $_lastLog', style: Theme.of(context).textTheme.bodySmall),
+            Text('Status: ${_lastLog.isEmpty ? (_running ? "Server running" : "Server stopped") : _lastLog}',
+                style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 20),
             _buildDeviceSelector(),
             const SizedBox(height: 20),
@@ -736,9 +763,9 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
               ..._localIps.map((ip) => Text(ip)),
             const SizedBox(height: 4),
             const Text(
-              'The broker keeps running in the background (even if you swipe the app '
+              'The service keeps running in the background (even if you swipe the app '
                   'away) thanks to the persistent notification - do not force-stop the app '
-                  'from Android settings, that kills it like any other app.',
+                  'from Android settings.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 12),
@@ -763,9 +790,30 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
               ],
             ),
             const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(_useWebSocket ? 'Protocol: WebSocket' : 'Protocol: MQTT'),
+              subtitle: Text(
+                _useWebSocket
+                    ? 'ESP32 connects via WebSocket (ws://)'
+                    : 'ESP32 connects via MQTT broker',
+              ),
+              value: _useWebSocket,
+              onChanged: running
+                  ? null
+                  : (value) async {
+                      setState(() {
+                        _useWebSocket = value;
+                        _portController.text = value ? '8080' : '1883';
+                      });
+                      final settings = await SettingsRepository.create();
+                      await settings.setUseWebSocket(value);
+                    },
+            ),
+            const SizedBox(height: 12),
             FilledButton(
               onPressed: _busy ? null : _toggleBroker,
-              child: Text(running ? 'Stop Broker' : 'Start Broker'),
+              child: Text(running ? 'Stop Server' : 'Start Server'),
             ),
             const SizedBox(height: 4),
             Text('Connected clients: $_clientCount'),
