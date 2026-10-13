@@ -36,7 +36,25 @@ class HomeCubit extends Cubit<HomeState> {
       )) {
     _deviceSubscription = _deviceRepository
         .watchConnectedDevices(() => state.registeredMics.map((m) => m.id).toList())
-        .listen((devices) => emit(state.copyWith(connectedDevices: devices)));
+        .listen((devices) {
+      final currentMics = [...state.registeredMics];
+
+      for (final deviceId in devices) {
+        if (!currentMics.any((m) => m.id == deviceId)) {
+          currentMics.add(RegisteredMic(
+            id: deviceId,
+            fullName: deviceId.startsWith('esp32-')
+                ? 'ESP32 (${deviceId.replaceFirst('esp32-', '')})'
+                : 'Mic ($deviceId)',
+          ));
+        }
+      }
+
+      emit(state.copyWith(
+        registeredMics: currentMics,
+        connectedDevices: devices,
+      ));
+    });
   }
 
   final MicDeviceRepository _deviceRepository;
@@ -92,6 +110,7 @@ class HomeCubit extends Cubit<HomeState> {
       }
       final remarks =
           "${tag.label} (${(tag.confidence * 100).toStringAsFixed(0)}%)";
+      debugPrint('[HomeCubit] $slot -> classified tag: $remarks');
       emit(
         state.copyWith(
           tags: {...state.tags, slot: remarks},

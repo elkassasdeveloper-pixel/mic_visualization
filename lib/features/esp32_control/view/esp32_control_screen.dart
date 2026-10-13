@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:esp_smartconfig/esp_smartconfig.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:mic_visualization/data/services/broker_task_handler.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -35,6 +38,11 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   bool _serviceReady = false;
   bool _busy = false; // true while starting/stopping the service
 
+  // ---- audio (equalizer + PCM playback) ----
+  List<double> _visualizerValues = List.filled(15, 0.1);
+  bool _pcmReady = false;
+  Future<void>? _pcmSetup;
+
   final Map<String, Color> _colors = {
     'red': Colors.red,
     'green': Colors.green,
@@ -64,6 +72,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
+    _releasePcm();
     _portController.dispose();
     _topicController.dispose();
     super.dispose();
@@ -115,7 +124,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   void _onTaskData(Object data) {
     if (data is! Map) return;
 
-    debugPrint('[UI] Task data: $data');
+    if (data['type'] != 'audio') debugPrint('[UI] Task data: $data');
 
     switch (data['type']) {
       case 'ready':
@@ -153,10 +162,16 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
         break;
 
       case 'running':
+        final isRunning = data['value'] as bool;
         if (mounted) {
           setState(() {
-            _running = data['value'] as bool;
+            _running = isRunning;
           });
+        }
+        if (isRunning) {
+          _ensurePcm();
+        } else {
+          _releasePcm();
         }
         break;
 
@@ -191,7 +206,82 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
           });
         }
         break;
+
+      case 'audio':
+        _handleAudio((data['value'] as List).cast<int>());
+        break;
     }
+  }
+
+  // ---- audio: PCM playback + equalizer ------------------------------------
+
+  Future<void> _ensurePcm() async {
+    if (_pcmReady) return;
+    final setup = _pcmSetup ??= () async {
+      try {
+        await FlutterPcmSound.setup(sampleRate: 16000, channelCount: 1);
+        FlutterPcmSound.start();
+        _pcmReady = true;
+      } finally {
+        _pcmSetup = null;
+      }
+    }();
+    await setup;
+  }
+
+  void _releasePcm() {
+    if (!_pcmReady) return;
+    _pcmReady = false;
+    FlutterPcmSound.release();
+  }
+
+  Future<void> _handleAudio(List<int> bytes) async {
+    if (bytes.length < 2 || bytes.length % 2 != 0) return;
+
+    final byteData = ByteData.sublistView(Uint8List.fromList(bytes));
+    final samples = <int>[
+      for (var i = 0; i < bytes.length; i += 2)
+        byteData.getInt16(i, Endian.little),
+    ];
+
+    _updateEqualizerUI(samples);
+
+    try {
+      await _ensurePcm();
+      await FlutterPcmSound.feed(PcmArrayInt16.fromList(samples));
+    } catch (e) {
+      debugPrint('[UI] PCM feed failed: $e');
+    }
+  }
+
+  void _updateEqualizerUI(List<int> rawPcmData) {
+    if (!mounted) return;
+
+    // Group the PCM data into bars and use each group's RMS as its height.
+    final int barCount = _visualizerValues.length;
+    final int chunkSize = (rawPcmData.length / barCount).floor();
+    if (chunkSize <= 0) return;
+
+    final List<double> newBarHeights = [];
+
+    for (int i = 0; i < barCount; i++) {
+      double sum = 0.0;
+      final int startIdx = i * chunkSize;
+
+      for (int j = 0; j < chunkSize; j++) {
+        final double normalizedSample = rawPcmData[startIdx + j].abs() / 32767.0;
+        sum += normalizedSample * normalizedSample;
+      }
+
+      final double rms = math.sqrt(sum / chunkSize);
+
+      // Add some motion on top of the real signal amplitude.
+      final double variation =
+          math.sin(DateTime.now().millisecondsSinceEpoch * 0.005 + i) * 0.3;
+      newBarHeights.add((rms + variation).clamp(0.05, 1.0));
+    }
+
+    setState(() => _visualizerValues = newBarHeights);
   }
 
   void _sendBrokerConfig() {
@@ -237,6 +327,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   Future<void> _toggleBrokerImpl() async {
     if (_running) {
       debugPrint('[UI] Stopping broker...');
+      _releasePcm();
 
       // 1) Ask the task to close its sockets and free the port.
       FlutterForegroundTask.sendDataToTask({
@@ -260,6 +351,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
           _running = false;
           _clientCount = 0;
           _deviceMacs = [];
+          _visualizerValues = List.filled(15, 0.1);
           _lastLog = 'Broker stopped';
         });
       }
@@ -677,6 +769,15 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
             ),
             const SizedBox(height: 4),
             Text('Connected clients: $_clientCount'),
+            // Equalizer
+            Container(
+              height: 200,
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: CustomPaint(
+                painter: EqualizerPainter(barHeights: _visualizerValues),
+                child: Container(),
+              ),
+            ),
           ],
         ),
       ),
@@ -980,4 +1081,44 @@ class _SmartConfigScreenState extends State<SmartConfigScreen> {
 String _prettyMac(String mac) {
   if (mac.length != 12) return mac;
   return [for (var i = 0; i < 12; i += 2) mac.substring(i, i + 2)].join(':');
+}
+
+// Custom painter that renders the equalizer bars.
+class EqualizerPainter extends CustomPainter {
+  final List<double> barHeights;
+
+  EqualizerPainter({required this.barHeights});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..shader = const LinearGradient(
+        colors: [Colors.cyanAccent, Colors.blueAccent, Colors.purpleAccent],
+        begin: Alignment.bottomCenter,
+        end: Alignment.topCenter,
+      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
+      ..style = PaintingStyle.fill;
+
+    const double spacing = 6.0;
+    final double totalSpacing = spacing * (barHeights.length - 1);
+    final double barWidth = (size.width - totalSpacing) / barHeights.length;
+
+    for (int i = 0; i < barHeights.length; i++) {
+      final double x = i * (barWidth + spacing);
+      final double barHeight = barHeights[i] * size.height;
+      final double y = size.height - barHeight;
+
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, y, barWidth, barHeight),
+        const Radius.circular(4.0),
+      );
+
+      canvas.drawRRect(rect, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant EqualizerPainter oldDelegate) {
+    return oldDelegate.barHeights != barHeights;
+  }
 }

@@ -64,7 +64,7 @@ class OtpInputState extends State<OtpInput> {
               final isActive = index == _controller.text.length;
 
               return Container(
-                width: 44,
+                width: 35,
                 height: 52,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(

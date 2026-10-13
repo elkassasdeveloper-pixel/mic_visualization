@@ -11,9 +11,7 @@ import 'package:mic_visualization/features/esp32_control/view/esp32_control_scre
 import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
 import 'package:mic_visualization/features/home/cubit/home_layout_cubit.dart';
 import 'package:mic_visualization/features/home/data/audio_tagging_service.dart';
-import 'package:mic_visualization/features/home/data/mic_device_repository.dart';
-import 'package:mic_visualization/features/home/data/parec_mic_recording_repository.dart';
-import 'package:mic_visualization/features/home/data/record_backed_mic_recording_repository.dart';
+import 'package:mic_visualization/features/home/data/composite_mic_repository.dart';
 import 'package:mic_visualization/features/home/widgets/draggable_mic_button.dart';
 import 'package:mic_visualization/features/home/widgets/home_background.dart';
 import 'package:mic_visualization/features/settings/view/settings_screen.dart';
@@ -46,8 +44,8 @@ class HomeScreen extends StatelessWidget {
       providers: [
         BlocProvider(
           create: (context) => HomeCubit(
-            RecordMicDeviceRepository(),
-            Platform.isLinux ? ParecMicRecordingRepository() : RecordBackedMicRecordingRepository(),
+            CompositeMicDeviceRepository(),
+            CompositeMicRecordingRepository(),
             taggingService,
             realtimeRepository,
             classificationRepository,

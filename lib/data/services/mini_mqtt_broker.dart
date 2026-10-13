@@ -3,22 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-/// A message the broker observed being published by any connected client,
-/// regardless of whether anyone else is subscribed to it. Used to feed
-/// telemetry displays in the app without the app needing to "subscribe"
-/// itself (it's the broker - it already sees every PUBLISH).
-class MqttBrokerMessage {
-  final String topic;
-  final String payload;
-  final String fromClientId;
-  final DateTime receivedAt;
-
-  MqttBrokerMessage({
-    required this.topic,
-    required this.payload,
-    required this.fromClientId,
-    required this.receivedAt,
-  });
+class MqttAudioChunk {
+  const MqttAudioChunk({required this.clientId, required this.payload});
+  final String clientId;
+  final List<int> payload;
 }
 
 class MiniMqttBroker {
@@ -33,21 +21,18 @@ class MiniMqttBroker {
   StreamController<String>.broadcast();
   final StreamController<int> _clientCountController =
   StreamController<int>.broadcast();
-  final StreamController<MqttBrokerMessage> _messageController =
-  StreamController<MqttBrokerMessage>.broadcast();
   final StreamController<List<String>> _clientIdsController =
   StreamController<List<String>>.broadcast();
+  final StreamController<MqttAudioChunk> _audioController =
+  StreamController<MqttAudioChunk>.broadcast();
 
   Stream<String> get logStream => _logController.stream;
   Stream<int> get clientCountStream => _clientCountController.stream;
 
-  /// Every PUBLISH the broker receives from any client, regardless of
-  /// whether it had a matching subscriber. Use this to observe telemetry.
-  Stream<MqttBrokerMessage> get messageStream => _messageController.stream;
-
   /// Emits the sorted list of MQTT client IDs currently connected (e.g.
   /// "esp32-AABBCCDDEEFF") every time a client connects or disconnects.
   Stream<List<String>> get clientIdsStream => _clientIdsController.stream;
+  Stream<MqttAudioChunk> get audioStream => _audioController.stream;
 
   List<String> get connectedClientIds => (_clients.values
       .map((c) => c.clientId)
@@ -109,8 +94,7 @@ class MiniMqttBroker {
       }
     });
 
-    _log('Announcing broker IP $ip on UDP:$discoveryPort every 2s '
-        '(to ${targets.map((t) => t.address).join(', ')})');
+    _log('Announcing broker IP $ip on UDP:$discoveryPort');
   }
 
   static bool _isPrivateIPv4(String a) =>
@@ -156,6 +140,7 @@ class MiniMqttBroker {
     for (final socket in _clients.keys.toList()) {
       socket.destroy();
     }
+    _log('Broker stopped');
     _clients.clear();
     await _server?.close();
     _server = null;
@@ -164,9 +149,9 @@ class MiniMqttBroker {
     _announceTimer = null;
     _announceSocket?.close();
     _announceSocket = null;
-
-    _log('Broker stopped');
-    _clientCountController.add(0);
+    if (!_clientCountController.isClosed) {
+      _clientCountController.add(0);
+    }
     _emitClientIds();
   }
 
@@ -174,17 +159,23 @@ class MiniMqttBroker {
     stop();
     _logController.close();
     _clientCountController.close();
-    _messageController.close();
     _clientIdsController.close();
+    _audioController.close();
   }
 
-  void _log(String message) => _logController.add(message);
+  void _log(String message) {
+    if (!_logController.isClosed) {
+      _logController.add(message);
+    }
+  }
 
   void _handleClient(Socket socket) {
     final state = _ClientState();
     _clients[socket] = state;
     _log('Client connected: ${socket.remoteAddress.address}');
-    _clientCountController.add(_clients.length);
+    if (!_clientCountController.isClosed) {
+      _clientCountController.add(_clients.length);
+    }
 
     socket.listen(
           (data) => _onData(socket, state, data),
@@ -197,7 +188,9 @@ class MiniMqttBroker {
   void _removeClient(Socket socket) {
     if (_clients.remove(socket) != null) {
       _log('Client disconnected');
-      _clientCountController.add(_clients.length);
+      if (!_clientCountController.isClosed) {
+        _clientCountController.add(_clients.length);
+      }
       _emitClientIds();
     }
     socket.destroy();
@@ -206,7 +199,14 @@ class MiniMqttBroker {
   void _onData(Socket socket, _ClientState state, Uint8List data) {
     state.buffer.addAll(data);
     while (true) {
-      final packet = _tryReadPacket(state.buffer);
+      Uint8List? packet;
+      try {
+        packet = _tryReadPacket(state.buffer);
+      } catch (e) {
+        _log('Corrupt packet from client ${socket.remoteAddress.address}: $e');
+        _removeClient(socket);
+        return;
+      }
       if (packet == null) return; // wait for more bytes
       try {
         _handlePacket(socket, state, packet);
@@ -219,12 +219,14 @@ class MiniMqttBroker {
   /// Extracts one full MQTT packet (fixed header + remaining bytes) from the
   /// front of [buffer] if enough data is available, removing it from
   /// [buffer]. Returns null if a full packet isn't available yet.
+  /// Throws [FormatException] if the header contains invalid/corrupt remaining length encoding.
   Uint8List? _tryReadPacket(List<int> buffer) {
     if (buffer.isEmpty) return null;
 
     int multiplier = 1;
     int value = 0;
     int index = 1;
+    int bytesRead = 0;
     int encodedByte;
     do {
       if (index >= buffer.length) return null;
@@ -232,9 +234,19 @@ class MiniMqttBroker {
       value += (encodedByte & 127) * multiplier;
       multiplier *= 128;
       index++;
+      bytesRead++;
+      if (bytesRead > 4) {
+        throw const FormatException(
+            'Malformed MQTT packet: remaining length field exceeds 4 bytes');
+      }
     } while ((encodedByte & 128) != 0);
 
     final totalLength = index + value;
+    if (value < 0 || totalLength < index || totalLength > 10 * 1024 * 1024) {
+      throw FormatException(
+          'Malformed MQTT packet: invalid remaining length ($value)');
+    }
+
     if (buffer.length < totalLength) return null;
 
     final packetBytes = Uint8List.fromList(buffer.sublist(0, totalLength));
@@ -244,13 +256,14 @@ class MiniMqttBroker {
 
   int _remainingLengthFieldSize(Uint8List packet) {
     int index = 1;
-    while ((packet[index] & 128) != 0) {
+    while (index < packet.length && (packet[index] & 128) != 0) {
       index++;
     }
     return index; // number of bytes the remaining-length field occupied
   }
 
   void _handlePacket(Socket socket, _ClientState state, Uint8List packet) {
+    if (packet.isEmpty) return;
     final packetType = (packet[0] & 0xF0) >> 4;
     switch (packetType) {
       case 1:
@@ -266,7 +279,11 @@ class MiniMqttBroker {
         _handleUnsubscribe(socket, state, packet);
         break;
       case 12: // PINGREQ
-        socket.add(Uint8List.fromList([0xD0, 0x00])); // PINGRESP
+        try {
+          socket.add(Uint8List.fromList([0xD0, 0x00])); // PINGRESP
+        } catch (e) {
+          _log('Error sending PINGRESP: $e');
+        }
         break;
       case 14: // DISCONNECT
         _removeClient(socket);
@@ -278,14 +295,27 @@ class MiniMqttBroker {
 
   void _handleConnect(Socket socket, _ClientState state, Uint8List packet) {
     int offset = 1 + _remainingLengthFieldSize(packet);
+    if (offset + 2 > packet.length) {
+      _log('Malformed CONNECT packet: header truncated');
+      return;
+    }
     final protoNameLen = (packet[offset] << 8) | packet[offset + 1];
     offset += 2 + protoNameLen;
     offset += 1; // protocol level
     offset += 1; // connect flags
     offset += 2; // keep alive
+    if (offset + 2 > packet.length) {
+      _log('Malformed CONNECT packet: payload truncated');
+      return;
+    }
     final clientIdLen = (packet[offset] << 8) | packet[offset + 1];
     offset += 2;
-    state.clientId = utf8.decode(packet.sublist(offset, offset + clientIdLen));
+    if (offset + clientIdLen > packet.length) {
+      _log('Malformed CONNECT packet: client ID truncated');
+      return;
+    }
+    state.clientId = utf8.decode(packet.sublist(offset, offset + clientIdLen),
+        allowMalformed: true);
 
     _log('CONNECT from "${state.clientId}"');
 
@@ -302,21 +332,30 @@ class MiniMqttBroker {
     }
 
     // CONNACK: session present = 0, return code = 0 (accepted)
-    socket.add(Uint8List.fromList([0x20, 0x02, 0x00, 0x00]));
+    try {
+      socket.add(Uint8List.fromList([0x20, 0x02, 0x00, 0x00]));
+    } catch (e) {
+      _log('Error sending CONNACK: $e');
+    }
     _emitClientIds();
   }
 
   void _handleSubscribe(Socket socket, _ClientState state, Uint8List packet) {
     int offset = 1 + _remainingLengthFieldSize(packet);
+    if (offset + 2 > packet.length) return;
     final packetId = (packet[offset] << 8) | packet[offset + 1];
     offset += 2;
 
     final grantedQos = <int>[];
     while (offset < packet.length) {
+      if (offset + 2 > packet.length) break;
       final topicLen = (packet[offset] << 8) | packet[offset + 1];
       offset += 2;
-      final topic = utf8.decode(packet.sublist(offset, offset + topicLen));
+      if (offset + topicLen > packet.length) break;
+      final topic = utf8.decode(packet.sublist(offset, offset + topicLen),
+          allowMalformed: true);
       offset += topicLen;
+      if (offset >= packet.length) break;
       final requestedQos = packet[offset];
       offset += 1;
 
@@ -326,57 +365,73 @@ class MiniMqttBroker {
     }
 
     final body = <int>[packetId >> 8, packetId & 0xFF, ...grantedQos];
-    socket.add(Uint8List.fromList([0x90, body.length, ...body]));
+    try {
+      socket.add(Uint8List.fromList([0x90, body.length, ...body]));
+    } catch (e) {
+      _log('Error sending SUBACK: $e');
+    }
   }
 
   void _handleUnsubscribe(
       Socket socket, _ClientState state, Uint8List packet) {
     int offset = 1 + _remainingLengthFieldSize(packet);
+    if (offset + 2 > packet.length) return;
     final packetId = (packet[offset] << 8) | packet[offset + 1];
     offset += 2;
 
     while (offset < packet.length) {
+      if (offset + 2 > packet.length) break;
       final topicLen = (packet[offset] << 8) | packet[offset + 1];
       offset += 2;
-      final topic = utf8.decode(packet.sublist(offset, offset + topicLen));
+      if (offset + topicLen > packet.length) break;
+      final topic = utf8.decode(packet.sublist(offset, offset + topicLen),
+          allowMalformed: true);
       offset += topicLen;
       state.subscriptions.remove(topic);
     }
 
-    socket.add(
-        Uint8List.fromList([0xB0, 0x02, packetId >> 8, packetId & 0xFF]));
+    try {
+      socket.add(
+          Uint8List.fromList([0xB0, 0x02, packetId >> 8, packetId & 0xFF]));
+    } catch (e) {
+      _log('Error sending UNSUBACK: $e');
+    }
   }
 
   void _handlePublish(Socket socket, _ClientState state, Uint8List packet) {
     final flags = packet[0] & 0x0F;
     final qos = (flags >> 1) & 0x03;
     int offset = 1 + _remainingLengthFieldSize(packet);
+    if (offset + 2 > packet.length) return;
     final topicLen = (packet[offset] << 8) | packet[offset + 1];
     offset += 2;
-    final topic = utf8.decode(packet.sublist(offset, offset + topicLen));
+    if (offset + topicLen > packet.length) return;
+    final topic = utf8.decode(packet.sublist(offset, offset + topicLen),
+        allowMalformed: true);
     offset += topicLen;
 
     int packetId = 0;
     if (qos > 0) {
+      if (offset + 2 > packet.length) return;
       packetId = (packet[offset] << 8) | packet[offset + 1];
       offset += 2;
     }
 
+    if (offset > packet.length) return;
     final payload = packet.sublist(offset);
-    final payloadString = utf8.decode(payload, allowMalformed: true);
-
-    _log('PUBLISH "$topic" from "${state.clientId}": $payloadString');
-
-    _messageController.add(MqttBrokerMessage(
-      topic: topic,
-      payload: payloadString,
-      fromClientId: state.clientId,
-      receivedAt: DateTime.now(),
-    ));
-
+    if (!_audioController.isClosed) {
+      _audioController.add(MqttAudioChunk(
+        clientId: state.clientId,
+        payload: payload,
+      ));
+    }
     if (qos == 1) {
-      socket.add(
-          Uint8List.fromList([0x40, 0x02, packetId >> 8, packetId & 0xFF]));
+      try {
+        socket.add(
+            Uint8List.fromList([0x40, 0x02, packetId >> 8, packetId & 0xFF]));
+      } catch (e) {
+        _log('Error sending PUBACK: $e');
+      }
     }
 
     publish(topic, payload);
@@ -400,13 +455,17 @@ class MiniMqttBroker {
     Uint8List.fromList([...fixedHeader, ...variableHeader, ...payload]);
 
     var sentCount = 0;
-    for (final entry in _clients.entries) {
+    for (final entry in _clients.entries.toList()) {
       if (targetClientId != null && entry.value.clientId != targetClientId) {
         continue;
       }
       if (entry.value.subscriptions.contains(topic)) {
-        entry.key.add(fullPacket);
-        sentCount++;
+        try {
+          entry.key.add(fullPacket);
+          sentCount++;
+        } catch (e) {
+          _log('Error publishing to ${entry.value.clientId}: $e');
+        }
       }
     }
     _log('Published "$topic" to $sentCount subscriber(s)'

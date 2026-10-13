@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mic_visualization/data/local/settings_repository.dart';
 import 'package:mic_visualization/data/repositories/auth_repository.dart';
@@ -29,19 +30,23 @@ class StartupCubit extends Cubit<StartupState> {
     final fugoTokens = <String, String>{};
 
     for (final mic in _settings.registeredMics) {
-      final micLogin = await _authRepository.login(userName: mic.id, password: mic.id);
-      if (!micLogin.isSuccess) continue;
+      try {
+        final micLogin = await _authRepository.login(userName: mic.id, password: mic.id);
+        if (!micLogin.isSuccess) continue;
 
-      slotTokens[mic.id] = micLogin.token;
+        slotTokens[mic.id] = micLogin.token;
         await _realtimeRepository.connectSlot(mic.id, micLogin.token2);
 
-      try {
-        final fugoToken = await UserChildrenApiService().findPrivateAdminTokenForSaeed(micLogin.token);
-        if (fugoToken != null) {
-          fugoTokens[mic.id] = fugoToken;
+        try {
+          final fugoToken = await UserChildrenApiService().findPrivateAdminTokenForSaeed(micLogin.token);
+          if (fugoToken != null) {
+            fugoTokens[mic.id] = fugoToken;
+          }
+        } catch (_) {
+          // fugo token unavailable — that mic just won't post fugo messages
         }
-      } catch (_) {
-        // fugo token unavailable — that mic just won't post fugo messages
+      } catch (e) {
+        debugPrint('[StartupCubit] Error authenticating mic ${mic.id}: $e');
       }
     }
 

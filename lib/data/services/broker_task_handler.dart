@@ -15,14 +15,15 @@ class BrokerTaskHandler extends TaskHandler {
 
   StreamSubscription<String>? _logSub;
   StreamSubscription<int>? _clientCountSub;
-  StreamSubscription<MqttBrokerMessage>? _messageSub;
   StreamSubscription<List<String>>? _clientIdsSub;
+  StreamSubscription<MqttAudioChunk>? _audioSub;
 
   int _port = 1883;
   String _colorTopic = 'esp32/led/set';
 
   bool _started = false;
   bool _starting = false; // guards against two setConfig messages racing
+  String _lastLog = '';
 
   @override
   Future<void> onStart(
@@ -33,6 +34,7 @@ class BrokerTaskHandler extends TaskHandler {
 
     _logSub = _broker.logStream.listen((msg) {
       debugPrint('[Broker] $msg');
+      _lastLog = msg;
 
       FlutterForegroundTask.sendDataToMain({
         'type': 'log',
@@ -54,13 +56,12 @@ class BrokerTaskHandler extends TaskHandler {
       });
     });
 
-    _messageSub = _broker.messageStream.listen((msg) {
+    // Raw payload of every PUBLISH the broker receives (audio chunks).
+    _audioSub = _broker.audioStream.listen((chunk) {
       FlutterForegroundTask.sendDataToMain({
-        'type': 'message',
-        'topic': msg.topic,
-        'payload': msg.payload,
-        'fromClientId': msg.fromClientId,
-        'receivedAt': msg.receivedAt.toIso8601String(),
+        'type': 'audio',
+        'value': chunk.payload,
+        'clientId': chunk.clientId,
       });
     });
 
@@ -116,10 +117,15 @@ class BrokerTaskHandler extends TaskHandler {
     await _broker.stop(); // also emits clientCount = 0 and an empty client list
     _started = false;
     _starting = false;
+    _lastLog = '';
 
     FlutterForegroundTask.sendDataToMain({
       'type': 'running',
       'value': false,
+    });
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'log',
+      'value': _lastLog,
     });
   }
 
@@ -136,6 +142,12 @@ class BrokerTaskHandler extends TaskHandler {
     FlutterForegroundTask.sendDataToMain({
       'type': 'clients',
       'value': _broker.connectedClientIds,
+    });
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'log',
+      'value': _lastLog.isNotEmpty
+          ? _lastLog
+          : (_started ? 'Broker listening on port $_port' : 'Broker stopped'),
     });
   }
 
@@ -232,8 +244,8 @@ class BrokerTaskHandler extends TaskHandler {
 
     await _logSub?.cancel();
     await _clientCountSub?.cancel();
-    await _messageSub?.cancel();
     await _clientIdsSub?.cancel();
+    await _audioSub?.cancel();
 
     await _broker.stop();
     _broker.dispose();

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mic_visualization/core/constants/app_images.dart';
@@ -13,11 +16,22 @@ class HomeBackground extends StatelessWidget {
     return BlocBuilder<ThemeCubit, ThemeState>(
       builder: (context, state) {
         final isLight = state.themeMode == ThemeMode.light;
-        final customBytes = isLight ? state.lightBackgroundBytes : state.darkBackgroundBytes;
+        final isWindows = !kIsWeb && Platform.isWindows;
+        final customBytes = isLight
+            ? state.lightBackgroundBytes
+            : state.darkBackgroundBytes;
 
         final ImageProvider imageProvider = customBytes != null
             ? MemoryImage(customBytes)
-            : AssetImage(isLight ? AppImages.car : AppImages.darkCar) as ImageProvider;
+            : AssetImage(
+                isLight
+                    ? isWindows
+                          ? AppImages.landscapeCar
+                          : AppImages.car
+                    : isWindows
+                    ? AppImages.landscapeDarkCar
+                    : AppImages.darkCar,
+              ) as ImageProvider;
 
         return Container(
           decoration: BoxDecoration(
