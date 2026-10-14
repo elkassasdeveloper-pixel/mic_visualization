@@ -86,27 +86,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(height: 32),
 
-          Text('ESP32 Communication Protocol', style: Theme.of(context).textTheme.titleMedium),
-          BlocBuilder<HomeCubit, HomeState>(
-            buildWhen: (prev, curr) => prev.useWebSocket != curr.useWebSocket,
-            builder: (context, state) {
-              return SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  state.useWebSocket ? 'Protocol: WebSocket' : 'Protocol: MQTT',
-                ),
-                subtitle: Text(
-                  state.useWebSocket
-                      ? 'ESP32 connects via WebSocket (ws://) on port 8080'
-                      : 'ESP32 connects via MQTT broker on port 1883',
-                ),
-                value: state.useWebSocket,
-                onChanged: context.read<HomeCubit>().setUseWebSocket,
-              );
-            },
-          ),
-          const Divider(height: 32),
-
           Text('Data sharing', style: Theme.of(context).textTheme.titleMedium),
           BlocBuilder<HomeCubit, HomeState>(
             buildWhen: (prev, curr) =>

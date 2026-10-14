@@ -1,6 +1,3 @@
-import 'dart:math';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_litert/flutter_litert.dart';
 import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
@@ -14,9 +11,6 @@ class AudioTaggingService {
       this._embeddingsIndex,
       this._embeddingDim,
       this._outputShapes,
-      this._customInterpreter,
-      this._customIsolate,
-      this._customLabels,
       );
 
   final Interpreter _yamnetInterpreter;
@@ -26,10 +20,6 @@ class AudioTaggingService {
   final int _embeddingsIndex;
   final int _embeddingDim;
   final List<List<int>> _outputShapes; // shape of every output tensor, in order
-
-  final Interpreter? _customInterpreter;
-  final IsolateInterpreter? _customIsolate;
-  final List<String> _customLabels;
 
   static final Set<String> _excludedTags = {
     "Hubbub, speech noise, speech babble",
@@ -83,17 +73,6 @@ class AudioTaggingService {
     final yamnetIsolate = await IsolateInterpreter.create(address: yamnetInterpreter.address);
     final labels = await _loadLabels(AudioTaggingConfig.labelsAsset);
 
-    Interpreter? customInterpreter;
-    IsolateInterpreter? customIsolate;
-    List<String> customLabels = [];
-    try {
-      customInterpreter = await Interpreter.fromAsset(AudioTaggingConfig.animalModelAsset);
-      customIsolate = await IsolateInterpreter.create(address: customInterpreter.address);
-      customLabels = await _loadLabels(AudioTaggingConfig.animalLabelsAsset);
-    } catch (_) {
-      // custom model not present — falls back to YAMNet-only behavior
-    }
-
     return AudioTaggingService._(
       yamnetInterpreter,
       yamnetIsolate,
@@ -102,9 +81,6 @@ class AudioTaggingService {
       embeddingsIndex,
       embeddingDim,
       outputShapes,
-      customInterpreter,
-      customIsolate,
-      customLabels,
     );
   }
 
@@ -120,13 +96,6 @@ class AudioTaggingService {
       return List.filled(shape[0], 0.0);
     }
     return List.generate(shape[0], (_) => _zeroBuffer(shape.sublist(1)));
-  }
-
-  List<double> _softmax(List<double> logits) {
-    final maxLogit = logits.reduce((a, b) => a > b ? a : b);
-    final exps = logits.map((x) => exp(x - maxLogit)).toList(); // subtract max for numerical stability
-    final sumExps = exps.reduce((a, b) => a + b);
-    return exps.map((e) => e / sumExps).toList();
   }
 
   Future<AudioTag?> classify(List<double> samples, {required double minConfidence}) async {
@@ -162,25 +131,6 @@ class AudioTaggingService {
       }
     }
 
-    // Try the custom classifier on the averaged embedding first.
-    if (_customIsolate != null && frameCount > 0) {
-      final customInput = [avgEmbedding];
-      final customOutput = [List.filled(_customLabels.length, 0.0)];
-      await _customIsolate.run(customInput, customOutput);
-
-      final scores = _softmax(customOutput[0]);
-      var bestIndex = 0;
-      for (var i = 1; i < scores.length; i++) {
-        if (scores[i] > scores[bestIndex]) bestIndex = i;
-      }
-
-      final bestLabel = _customLabels[bestIndex];
-      if (bestLabel != 'unknown' && scores[bestIndex] > minConfidence) {
-        debugPrint("$bestLabel-custom");
-        return AudioTag(bestLabel, scores[bestIndex]);
-      }
-    }
-
     // Fall back to YAMNet's own 521-class scores.
     var bestIndex = -1;
     for (var i = 0; i < scoresBuffer.length; i++) {
@@ -197,8 +147,6 @@ class AudioTaggingService {
   void dispose() {
     _yamnetIsolate.close();
     _yamnetInterpreter.close();
-    _customIsolate?.close();
-    _customInterpreter?.close();
   }
 }
 
