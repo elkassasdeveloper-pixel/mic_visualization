@@ -184,7 +184,6 @@ class HomeCubit extends Cubit<HomeState> {
       FlutterForegroundTask.sendDataToTask({
         'type': 'setConfig',
         'port': value ? 8080 : 1883,
-        'colorTopic': 'esp32/led/set',
         'useWebSocket': value,
       });
     }

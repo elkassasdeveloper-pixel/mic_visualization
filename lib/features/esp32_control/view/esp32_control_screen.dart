@@ -20,7 +20,6 @@ class Esp32ControlScreen extends StatefulWidget {
 
 class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBindingObserver {
   final _portController = TextEditingController(text: '1883');
-  final _topicController = TextEditingController(text: 'esp32/led/set');
 
   String _lastLog = '';
   int _clientCount = 0;
@@ -45,19 +44,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   bool _pcmReady = false;
   Future<void>? _pcmSetup;
 
-  final Map<String, Color> _colors = {
-    'red': Colors.red,
-    'green': Colors.green,
-    'blue': Colors.blue,
-    'yellow': Colors.yellow,
-    'cyan': Colors.cyan,
-    'magenta': Colors.pinkAccent,
-    'orange': Colors.orange,
-    'purple': Colors.purple,
-    'white': Colors.white,
-    'off': Colors.black,
-  };
-
   @override
   void initState() {
     super.initState();
@@ -77,7 +63,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     _releasePcm();
     _portController.dispose();
-    _topicController.dispose();
     super.dispose();
   }
 
@@ -107,8 +92,8 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'esp32_mqtt_broker',
-        channelName: 'ESP32 MQTT Broker',
-        channelDescription: 'Keeps the MQTT broker running for the ESP32 device.',
+        channelName: 'ESP32 Service',
+        channelDescription: 'Keeps the server running for the ESP32 device.',
         priority: NotificationPriority.LOW,
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
@@ -204,17 +189,13 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
 
       case 'message':
         final msg = _TelemetryMessage(
-          topic: data['topic'] as String,
-          payload: data['payload'] as String,
-          fromClientId: data['fromClientId'] as String,
+          topic: data['topic'] as String? ?? 'esp32/telemetry',
+          payload: data['payload'] as String? ?? '',
+          fromClientId: data['fromClientId'] as String? ?? '',
           receivedAt: DateTime.parse(
-            data['receivedAt'] as String,
+            data['receivedAt'] as String? ?? DateTime.now().toIso8601String(),
           ),
         );
-
-        if (msg.topic == _topicController.text.trim()) {
-          return;
-        }
 
         if (mounted) {
           setState(() {
@@ -310,15 +291,12 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     final port =
         int.tryParse(_portController.text.trim()) ?? defaultPort;
 
-    final colorTopic = _topicController.text.trim();
-
     debugPrint('[UI] Sending broker configuration...');
     debugPrint('[UI] port=$port, useWebSocket=$_useWebSocket');
 
     FlutterForegroundTask.sendDataToTask({
       'type': 'setConfig',
       'port': port,
-      'colorTopic': colorTopic,
       'useWebSocket': _useWebSocket,
     });
 
@@ -382,8 +360,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     final port =
         int.tryParse(_portController.text.trim()) ?? defaultPort;
 
-    final colorTopic = _topicController.text.trim();
-
     if (mounted) {
       setState(() {
         _lastLog = 'Starting ${_useWebSocket ? 'WebSocket' : 'MQTT'} server...';
@@ -438,7 +414,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       FlutterForegroundTask.sendDataToTask({
         'type': 'setConfig',
         'port': port,
-        'colorTopic': colorTopic,
         'useWebSocket': _useWebSocket,
       });
 
@@ -456,25 +431,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
         _running = false;
       });
     }
-  }
-
-  void _sendColor(String colorName) {
-    final target =
-    _selectedMac == _allDevices ? null : '$_clientIdPrefix$_selectedMac';
-
-    FlutterForegroundTask.sendDataToTask({
-      'type': 'sendColor',
-      'value': colorName,
-      'target': target,
-    });
-
-    final where = target == null ? 'all devices' : _deviceLabel(_selectedMac);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Sent "$colorName" to $where'),
-        duration: const Duration(milliseconds: 900),
-      ),
-    );
   }
 
   String _formatMac(String mac) {
@@ -589,7 +545,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
               labelText: 'Target device',
               helperText: _deviceMacs.isEmpty
                   ? 'No ESP32 connected yet'
-                  : 'Colors and telemetry are limited to the selected device',
+                  : 'Telemetry is limited to the selected device',
               border: const OutlineInputBorder(),
               contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -669,7 +625,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ESP32 LED Control'),
+        title: const Text('ESP32 Control'),
         actions: [
           IconButton(
             icon: const Icon(Icons.wifi),
@@ -700,24 +656,6 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 20),
             _buildDeviceSelector(),
-            const SizedBox(height: 20),
-            Text('Colors', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisSpacing: 10,
-              mainAxisSpacing: 10,
-              children: _colors.entries.map((entry) {
-                return _ColorButton(
-                  label: entry.key,
-                  color: entry.value,
-                  enabled: _running,
-                  onTap: () => _sendColor(entry.key),
-                );
-              }).toList(),
-            ),
             const SizedBox(height: 24),
             Text('Telemetry', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
@@ -769,25 +707,11 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _portController,
-                    enabled: !running,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Port'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _topicController,
-                    enabled: !running,
-                    decoration: const InputDecoration(labelText: 'Topic'),
-                  ),
-                ),
-              ],
+            TextField(
+              controller: _portController,
+              enabled: !running,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Port'),
             ),
             const SizedBox(height: 12),
             SwitchListTile(
@@ -845,42 +769,6 @@ class _TelemetryMessage {
     required this.fromClientId,
     required this.receivedAt,
   });
-}
-
-class _ColorButton extends StatelessWidget {
-  final String label;
-  final Color color;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  const _ColorButton({
-    required this.label,
-    required this.color,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = color.computeLuminance() < 0.4;
-    return Material(
-      color: color.withValues(alpha: enabled ? 1.0 : 0.35),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: enabled ? onTap : null,
-        child: Center(
-          child: Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              color: isDark ? Colors.white : Colors.black,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 // ---------------- SmartConfig screen ----------------

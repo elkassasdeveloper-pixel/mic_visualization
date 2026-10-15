@@ -21,7 +21,6 @@ class BrokerTaskHandler extends TaskHandler {
   StreamSubscription<MqttAudioChunk>? _audioSub;
 
   int _port = 1883;
-  String _colorTopic = 'esp32/led/set';
   bool _useWebSocket = false;
 
   bool _started = false;
@@ -201,12 +200,11 @@ class BrokerTaskHandler extends TaskHandler {
     switch (data['type']) {
       case 'setConfig':
         _port = data['port'] as int? ?? (_useWebSocket ? 8080 : 1883);
-        _colorTopic = data['colorTopic'] as String? ?? 'esp32/led/set';
         _useWebSocket = data['useWebSocket'] as bool? ?? false;
 
         debugPrint(
           '[BrokerTaskHandler] Config received: '
-              'port=$_port, colorTopic=$_colorTopic, useWebSocket=$_useWebSocket',
+              'port=$_port, useWebSocket=$_useWebSocket',
         );
 
         _startBroker();
@@ -214,20 +212,6 @@ class BrokerTaskHandler extends TaskHandler {
 
       case 'getStatus':
         _sendStatus();
-        break;
-
-      case 'sendColor':
-        final color = data['value'] as String?;
-        final target = data['target'] as String?;
-
-        if (color != null) {
-          debugPrint('[BrokerTaskHandler] Publishing color: $color');
-          if (_useWebSocket) {
-            _wsServer.sendString(color, targetClientId: target);
-          } else {
-            _mqttBroker.publishString(_colorTopic, color, targetClientId: target);
-          }
-        }
         break;
 
       case 'sendCommand':
@@ -239,7 +223,7 @@ class BrokerTaskHandler extends TaskHandler {
           if (_useWebSocket) {
             _wsServer.sendString(command, targetClientId: cmdTarget);
           } else {
-            _mqttBroker.publishString(_colorTopic, command, targetClientId: cmdTarget);
+            _mqttBroker.publishString('esp32/cmd', command, targetClientId: cmdTarget);
           }
         }
         break;
