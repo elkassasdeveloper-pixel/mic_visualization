@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:mic_visualization/data/models/esp_transport.dart';
 import 'package:mic_visualization/data/models/registered_mic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -51,8 +52,24 @@ class SettingsRepository {
   bool get postToCloudEnabled => _prefs.getBool('postToCloudEnabled') ?? false;
   Future<void> setPostToCloudEnabled(bool value) => _prefs.setBool('postToCloudEnabled', value);
 
-  bool get useWebSocket => _prefs.getBool('useWebSocket') ?? false;
-  Future<void> setUseWebSocket(bool value) => _prefs.setBool('useWebSocket', value);
+  /// MQTT / WebSocket / Bluetooth. Falls back to the old 'useWebSocket' flag
+  /// for installs that saved their choice before Bluetooth existed.
+  EspTransport get transport {
+    final saved = _prefs.getString('transport');
+    if (saved != null) return EspTransport.fromId(saved);
+    return (_prefs.getBool('useWebSocket') ?? false)
+        ? EspTransport.websocket
+        : EspTransport.mqtt;
+  }
+
+  Future<void> setTransport(EspTransport value) async {
+    await _prefs.setString('transport', value.id);
+    await _prefs.setBool('useWebSocket', value == EspTransport.websocket);
+  }
+
+  bool get useWebSocket => transport == EspTransport.websocket;
+  Future<void> setUseWebSocket(bool value) =>
+      setTransport(value ? EspTransport.websocket : EspTransport.mqtt);
 
   // Layout positions (slot -> [dx, dy] fractional)
   Map<String, Offset>? _decodePositions(String? json) {

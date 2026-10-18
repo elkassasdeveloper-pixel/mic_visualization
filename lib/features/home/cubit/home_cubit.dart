@@ -6,10 +6,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:mic_visualization/data/local/settings_repository.dart';
 import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:mic_visualization/data/models/esp_transport.dart';
 import 'package:mic_visualization/data/models/login_response.dart';
 import 'package:mic_visualization/data/models/registered_mic.dart';
 import 'package:mic_visualization/data/repositories/classification_repository.dart';
 import 'package:mic_visualization/data/repositories/realtime_repository.dart';
+import 'package:mic_visualization/data/services/ble_permissions.dart';
 import 'package:mic_visualization/data/services/cloud_api_service.dart';
 import 'package:mic_visualization/data/services/fugo_message_service.dart';
 import 'package:mic_visualization/data/services/user_children_api_service.dart';
@@ -35,7 +37,7 @@ class HomeCubit extends Cubit<HomeState> {
         minConfidence: _settings.minConfidence,
         publishEnabled: _settings.publishEnabled,
         postToCloudEnabled: _settings.postToCloudEnabled,
-        useWebSocket: _settings.useWebSocket,
+        transport: _settings.transport,
       )) {
     _deviceSubscription = _deviceRepository
         .watchConnectedDevices(() => state.registeredMics.map((m) => m.id).toList())
@@ -94,8 +96,8 @@ class HomeCubit extends Cubit<HomeState> {
     emit(state.copyWith(recordingSlots: {...state.recordingSlots, slot}));
 
     _windowSubscriptions[slot] = _recordingRepository.windowsFor(slot).listen((
-      samples,
-    ) async {
+        samples,
+        ) async {
       final tag = await _taggingService.classify(
         samples,
         minConfidence: state.minConfidence,
@@ -172,19 +174,39 @@ class HomeCubit extends Cubit<HomeState> {
     _settings.setPostToCloudEnabled(value);
   }
 
-  void setUseWebSocket(bool value) async {
-    emit(state.copyWith(useWebSocket: value));
-    await _settings.setUseWebSocket(value);
+  void setUseWebSocket(bool value) =>
+      setTransport(value ? EspTransport.websocket : EspTransport.mqtt);
 
-    if (!kIsWeb && Platform.isAndroid && await FlutterForegroundTask.isRunningService) {
+  Future<void> setTransport(EspTransport transport) async {
+    if (transport == state.transport) return;
+
+    final serviceRunning =
+        !kIsWeb && Platform.isAndroid && await FlutterForegroundTask.isRunningService;
+
+    if (serviceRunning &&
+        transport == EspTransport.bluetooth &&
+        !await requestBluetoothPermissions()) {
+      debugPrint('[HomeCubit] Bluetooth permission denied - staying on ${state.transport.label}');
+      return;
+    }
+
+    emit(state.copyWith(transport: transport));
+    await _settings.setTransport(transport);
+
+    if (serviceRunning) {
+      // 1) Tell the ESP32s to switch; the command travels over the CURRENT link.
       FlutterForegroundTask.sendDataToTask({
         'type': 'sendCommand',
-        'value': value ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
+        'value': transport.espCommand,
       });
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      // 2) Move the phone side over; the task restarts for the new transport.
       FlutterForegroundTask.sendDataToTask({
         'type': 'setConfig',
-        'port': value ? 8080 : 1883,
-        'useWebSocket': value,
+        'port': transport.defaultPort,
+        'transport': transport.id,
+        'useWebSocket': transport == EspTransport.websocket,
       });
     }
   }
@@ -196,7 +218,7 @@ class HomeCubit extends Cubit<HomeState> {
 
     if (micLogin.isSuccess) {
       _slotTokens[mic.id] = micLogin.token;
-        await _realtimeRepository.connectSlot(mic.id, micLogin.token2);
+      await _realtimeRepository.connectSlot(mic.id, micLogin.token2);
 
       try {
         final fugoToken = await UserChildrenApiService().findPrivateAdminTokenForSaeed(micLogin.token);
@@ -230,7 +252,7 @@ class HomeState {
     this.minConfidence = 0.5,
     this.publishEnabled = true,
     this.postToCloudEnabled = false,
-    this.useWebSocket = false,
+    this.transport = EspTransport.mqtt,
   });
 
   final List<RegisteredMic> registeredMics;
@@ -241,7 +263,9 @@ class HomeState {
   final double minConfidence;
   final bool publishEnabled;
   final bool postToCloudEnabled;
-  final bool useWebSocket;
+  final EspTransport transport;
+
+  bool get useWebSocket => transport == EspTransport.websocket;
 
   bool isActive(String slot) => connectedDevices.contains(slot);
   bool isRecording(String slot) => recordingSlots.contains(slot);
@@ -257,7 +281,7 @@ class HomeState {
     double? minConfidence,
     bool? publishEnabled,
     bool? postToCloudEnabled,
-    bool? useWebSocket,
+    EspTransport? transport,
   }) {
     return HomeState(
       registeredMics: registeredMics ?? this.registeredMics,
@@ -268,7 +292,7 @@ class HomeState {
       minConfidence: minConfidence ?? this.minConfidence,
       publishEnabled: publishEnabled ?? this.publishEnabled,
       postToCloudEnabled: postToCloudEnabled ?? this.postToCloudEnabled,
-      useWebSocket: useWebSocket ?? this.useWebSocket,
+      transport: transport ?? this.transport,
     );
   }
 }

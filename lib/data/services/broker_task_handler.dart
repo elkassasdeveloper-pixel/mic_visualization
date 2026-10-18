@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:mic_visualization/data/models/esp_transport.dart';
 
+import 'ble_audio_client.dart';
 import 'mini_mqtt_broker.dart';
 import 'mini_websocket_server.dart';
 
@@ -14,6 +16,7 @@ void startBrokerTaskCallback() {
 class BrokerTaskHandler extends TaskHandler {
   final MiniMqttBroker _mqttBroker = MiniMqttBroker();
   final MiniWebSocketServer _wsServer = MiniWebSocketServer();
+  final BleAudioClient _bleClient = BleAudioClient();
 
   StreamSubscription<String>? _logSub;
   StreamSubscription<int>? _clientCountSub;
@@ -21,11 +24,17 @@ class BrokerTaskHandler extends TaskHandler {
   StreamSubscription<MqttAudioChunk>? _audioSub;
 
   int _port = 1883;
-  bool _useWebSocket = false;
+  EspTransport _transport = EspTransport.mqtt;
 
   bool _started = false;
   bool _starting = false; // guards against two setConfig messages racing
   String _lastLog = '';
+
+  String get _transportName => switch (_transport) {
+    EspTransport.mqtt => 'MQTT broker',
+    EspTransport.websocket => 'WebSocket server',
+    EspTransport.bluetooth => 'Bluetooth',
+  };
 
   @override
   Future<void> onStart(
@@ -46,17 +55,29 @@ class BrokerTaskHandler extends TaskHandler {
   void _setupSubscriptions() {
     _cancelSubscriptions();
 
-    if (_useWebSocket) {
-      _logSub = _wsServer.logStream.listen(_onLog);
-      _clientCountSub = _wsServer.clientCountStream.listen(_onClientCount);
-      _clientIdsSub = _wsServer.clientIdsStream.listen(_onClientIds);
-      _audioSub = _wsServer.audioStream.listen(_onAudioChunk);
-    } else {
-      _logSub = _mqttBroker.logStream.listen(_onLog);
-      _clientCountSub = _mqttBroker.clientCountStream.listen(_onClientCount);
-      _clientIdsSub = _mqttBroker.clientIdsStream.listen(_onClientIds);
-      _audioSub = _mqttBroker.audioStream.listen(_onAudioChunk);
+    switch (_transport) {
+      case EspTransport.websocket:
+        _bind(_wsServer.logStream, _wsServer.clientCountStream,
+            _wsServer.clientIdsStream, _wsServer.audioStream);
+      case EspTransport.bluetooth:
+        _bind(_bleClient.logStream, _bleClient.clientCountStream,
+            _bleClient.clientIdsStream, _bleClient.audioStream);
+      case EspTransport.mqtt:
+        _bind(_mqttBroker.logStream, _mqttBroker.clientCountStream,
+            _mqttBroker.clientIdsStream, _mqttBroker.audioStream);
     }
+  }
+
+  void _bind(
+      Stream<String> log,
+      Stream<int> count,
+      Stream<List<String>> ids,
+      Stream<MqttAudioChunk> audio,
+      ) {
+    _logSub = log.listen(_onLog);
+    _clientCountSub = count.listen(_onClientCount);
+    _clientIdsSub = ids.listen(_onClientIds);
+    _audioSub = audio.listen(_onAudioChunk);
   }
 
   void _cancelSubscriptions() {
@@ -108,22 +129,28 @@ class BrokerTaskHandler extends TaskHandler {
     try {
       _setupSubscriptions();
 
-      if (_useWebSocket) {
-        debugPrint('[BrokerTaskHandler] Starting WebSocket server on port $_port...');
-        await _wsServer.start(_port);
-      } else {
-        debugPrint('[BrokerTaskHandler] Starting MQTT broker on port $_port...');
-        await _mqttBroker.start(_port);
+      switch (_transport) {
+        case EspTransport.websocket:
+          debugPrint('[BrokerTaskHandler] Starting WebSocket server on port $_port...');
+          await _wsServer.start(_port);
+        case EspTransport.bluetooth:
+          debugPrint('[BrokerTaskHandler] Starting Bluetooth scan...');
+          await _bleClient.start();
+        case EspTransport.mqtt:
+          debugPrint('[BrokerTaskHandler] Starting MQTT broker on port $_port...');
+          await _mqttBroker.start(_port);
       }
 
       _started = true;
       _starting = false;
 
       if (_lastLog.isEmpty) {
-        _lastLog = '${_useWebSocket ? 'WebSocket server' : 'MQTT broker'} listening on port $_port';
+        _lastLog = _transport.usesPort
+            ? '$_transportName listening on port $_port'
+            : 'Bluetooth scanning for ESP32 devices';
       }
 
-      debugPrint('[BrokerTaskHandler] Started successfully on port $_port');
+      debugPrint('[BrokerTaskHandler] Started successfully ($_transportName)');
 
       _sendStatus();
     } catch (e, stackTrace) {
@@ -139,10 +166,13 @@ class BrokerTaskHandler extends TaskHandler {
   }
 
   Future<void> _stopBroker() async {
-    if (_useWebSocket) {
-      await _wsServer.stop();
-    } else {
-      await _mqttBroker.stop();
+    switch (_transport) {
+      case EspTransport.websocket:
+        await _wsServer.stop();
+      case EspTransport.bluetooth:
+        await _bleClient.stop();
+      case EspTransport.mqtt:
+        await _mqttBroker.stop();
     }
     _started = false;
     _starting = false;
@@ -158,13 +188,33 @@ class BrokerTaskHandler extends TaskHandler {
     });
   }
 
+  /// Applies a new transport/port. If a server is already running with a
+  /// different configuration it is stopped first, then started again.
+  Future<void> _applyConfig(EspTransport next, int port) async {
+    final changed = next != _transport || port != _port;
+    if (_started && changed) {
+      await _stopBroker(); // stops the OLD transport
+      _lastLog = '';
+    }
+    _transport = next;
+    _port = port;
+    await _startBroker();
+  }
+
   void _sendStatus() {
-    final count = _useWebSocket
-        ? _wsServer.connectedClientCount
-        : _mqttBroker.connectedClientCount;
-    final ids = _useWebSocket
-        ? _wsServer.connectedClientIds
-        : _mqttBroker.connectedClientIds;
+    final int count;
+    final List<String> ids;
+    switch (_transport) {
+      case EspTransport.websocket:
+        count = _wsServer.connectedClientCount;
+        ids = _wsServer.connectedClientIds;
+      case EspTransport.bluetooth:
+        count = _bleClient.connectedClientCount;
+        ids = _bleClient.connectedClientIds;
+      case EspTransport.mqtt:
+        count = _mqttBroker.connectedClientCount;
+        ids = _mqttBroker.connectedClientIds;
+    }
 
     FlutterForegroundTask.sendDataToMain({
       'type': 'running',
@@ -183,7 +233,9 @@ class BrokerTaskHandler extends TaskHandler {
       'value': _lastLog.isNotEmpty
           ? _lastLog
           : (_started
-          ? '${_useWebSocket ? 'WebSocket' : 'MQTT'} listening on port $_port'
+          ? (_transport.usesPort
+          ? '$_transportName listening on port $_port'
+          : 'Bluetooth scanning for ESP32 devices')
           : 'Server stopped'),
     });
   }
@@ -199,15 +251,20 @@ class BrokerTaskHandler extends TaskHandler {
 
     switch (data['type']) {
       case 'setConfig':
-        _port = data['port'] as int? ?? (_useWebSocket ? 8080 : 1883);
-        _useWebSocket = data['useWebSocket'] as bool? ?? false;
+      // New messages carry 'transport'; older callers only send 'useWebSocket'.
+        final next = data['transport'] is String
+            ? EspTransport.fromId(data['transport'] as String)
+            : ((data['useWebSocket'] as bool? ?? false)
+            ? EspTransport.websocket
+            : EspTransport.mqtt);
+        final port = data['port'] as int? ?? next.defaultPort;
 
         debugPrint(
           '[BrokerTaskHandler] Config received: '
-              'port=$_port, useWebSocket=$_useWebSocket',
+              'transport=${next.id}, port=$port',
         );
 
-        _startBroker();
+        _applyConfig(next, port);
         break;
 
       case 'getStatus':
@@ -219,11 +276,15 @@ class BrokerTaskHandler extends TaskHandler {
         final cmdTarget = data['target'] as String?;
 
         if (command != null) {
-          debugPrint('[BrokerTaskHandler] Publishing command: $command');
-          if (_useWebSocket) {
-            _wsServer.sendString(command, targetClientId: cmdTarget);
-          } else {
-            _mqttBroker.publishString('esp32/cmd', command, targetClientId: cmdTarget);
+          debugPrint('[BrokerTaskHandler] Sending command: $command');
+          switch (_transport) {
+            case EspTransport.websocket:
+              _wsServer.sendString(command, targetClientId: cmdTarget);
+            case EspTransport.bluetooth:
+              _bleClient.sendString(command, targetClientId: cmdTarget);
+            case EspTransport.mqtt:
+              _mqttBroker.publishString('esp32/cmd', command,
+                  targetClientId: cmdTarget);
           }
         }
         break;
@@ -253,6 +314,8 @@ class BrokerTaskHandler extends TaskHandler {
     _mqttBroker.dispose();
     await _wsServer.stop();
     _wsServer.dispose();
+    await _bleClient.stop();
+    _bleClient.dispose();
 
     debugPrint('[BrokerTaskHandler] Stopped from onDestroy');
   }

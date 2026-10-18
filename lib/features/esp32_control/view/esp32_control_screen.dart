@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_pcm_sound/flutter_pcm_sound.dart';
 import 'package:mic_visualization/data/local/settings_repository.dart';
+import 'package:mic_visualization/data/models/esp_transport.dart';
+import 'package:mic_visualization/data/services/ble_permissions.dart';
 import 'package:mic_visualization/data/services/broker_task_handler.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -24,7 +26,7 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
   String _lastLog = '';
   int _clientCount = 0;
   bool _running = false;
-  bool _useWebSocket = false;
+  EspTransport _transport = EspTransport.mqtt;
   List<String> _localIps = [];
 
   final List<_TelemetryMessage> _messages = [];
@@ -70,8 +72,8 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     final settings = await SettingsRepository.create();
     if (mounted) {
       setState(() {
-        _useWebSocket = settings.useWebSocket;
-        _portController.text = _useWebSocket ? '8080' : '1883';
+        _transport = settings.transport;
+        _portController.text = _transport.defaultPort.toString();
       });
     }
   }
@@ -281,30 +283,36 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
     setState(() => _visualizerValues = newBarHeights);
   }
 
+  int get _port =>
+      int.tryParse(_portController.text.trim()) ?? _transport.defaultPort;
+
+  Map<String, Object> _configMessage(int port) => {
+    'type': 'setConfig',
+    'port': port,
+    'transport': _transport.id,
+    'useWebSocket': _transport == EspTransport.websocket,
+  };
+
+  /// Tells already-connected ESP32s which Wi-Fi protocol to use. Skipped for
+  /// Bluetooth: a device that is connected over BLE is already in BLE mode and
+  /// would be kicked out of it by a USE_WEBSOCKET command.
+  void _sendProtocolCommand() {
+    if (_transport == EspTransport.bluetooth) return;
+    FlutterForegroundTask.sendDataToTask({
+      'type': 'sendCommand',
+      'value': _transport.espCommand,
+    });
+  }
+
   Future<void> _sendBrokerConfig() async {
     if (!_serviceReady) {
       debugPrint('[UI] Task is not ready yet');
       return;
     }
 
-    final defaultPort = _useWebSocket ? 8080 : 1883;
-    final port =
-        int.tryParse(_portController.text.trim()) ?? defaultPort;
-
-    debugPrint('[UI] Sending broker configuration...');
-    debugPrint('[UI] port=$port, useWebSocket=$_useWebSocket');
-
-    FlutterForegroundTask.sendDataToTask({
-      'type': 'setConfig',
-      'port': port,
-      'useWebSocket': _useWebSocket,
-    });
-
-    FlutterForegroundTask.sendDataToTask({
-      'type': 'sendCommand',
-      'value': _useWebSocket ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
-    });
-
+    debugPrint('[UI] Sending configuration: transport=${_transport.id}, port=$_port');
+    FlutterForegroundTask.sendDataToTask(_configMessage(_port));
+    _sendProtocolCommand();
     debugPrint('[UI] Configuration sent');
   }
 
@@ -326,54 +334,70 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
 
   Future<void> _toggleBrokerImpl() async {
     if (_running) {
-      debugPrint('[UI] Stopping broker...');
-      _releasePcm();
+      await _stopServer();
+    } else {
+      await _startServer();
+    }
+  }
 
-      // 1) Ask the task to close its sockets and free the port.
-      FlutterForegroundTask.sendDataToTask({
-        'type': 'stop',
+  Future<void> _stopServer() async {
+    debugPrint('[UI] Stopping server...');
+    _releasePcm();
+
+    // 1) Ask the task to close its sockets / BLE links and free the port.
+    FlutterForegroundTask.sendDataToTask({
+      'type': 'stop',
+    });
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // 2) Stop the Android service.
+    final result = await FlutterForegroundTask.stopService();
+    debugPrint('[UI] stopService result: $result');
+
+    for (var i = 0; i < 25; i++) {
+      if (!await FlutterForegroundTask.isRunningService) break;
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+
+    if (mounted) {
+      setState(() {
+        _running = false;
+        _clientCount = 0;
+        _deviceMacs = [];
+        _visualizerValues = List.filled(15, 0.1);
+        _lastLog = 'Server stopped';
       });
-      await Future.delayed(const Duration(milliseconds: 500));
+    }
+  }
 
-      // 2) Stop the Android service.
-      final result = await FlutterForegroundTask.stopService();
-      debugPrint('[UI] stopService result: $result');
+  Future<void> _startServer() async {
+    final port = _port;
 
-      for (var i = 0; i < 25; i++) {
-        if (!await FlutterForegroundTask.isRunningService) break;
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
-
+    // The permission dialog needs an Activity, so ask here (UI isolate)
+    // before the service isolate starts scanning.
+    if (_transport == EspTransport.bluetooth &&
+        !await requestBluetoothPermissions()) {
       if (mounted) {
-        setState(() {
-          _running = false;
-          _clientCount = 0;
-          _deviceMacs = [];
-          _visualizerValues = List.filled(15, 0.1);
-          _lastLog = 'Server stopped';
-        });
+        setState(() => _lastLog =
+        'Bluetooth permission denied - allow "Nearby devices" for this app');
       }
       return;
     }
 
-    final defaultPort = _useWebSocket ? 8080 : 1883;
-    final port =
-        int.tryParse(_portController.text.trim()) ?? defaultPort;
-
     if (mounted) {
-      setState(() {
-        _lastLog = 'Starting ${_useWebSocket ? 'WebSocket' : 'MQTT'} server...';
-      });
+      setState(() => _lastLog = 'Starting ${_transport.label}...');
     }
 
     final settings = await SettingsRepository.create();
-    await settings.setUseWebSocket(_useWebSocket);
+    await settings.setTransport(_transport);
 
     try {
       final result = await FlutterForegroundTask.startService(
         serviceId: 256,
         notificationTitle: 'ESP32 Audio Service',
-        notificationText: 'Starting server on port $port...',
+        notificationText: _transport.usesPort
+            ? 'Starting server on port $port...'
+            : 'Scanning for Bluetooth devices...',
         callback: startBrokerTaskCallback,
       );
 
@@ -411,16 +435,8 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       }
 
       if (mounted) setState(() => _running = true);
-      FlutterForegroundTask.sendDataToTask({
-        'type': 'setConfig',
-        'port': port,
-        'useWebSocket': _useWebSocket,
-      });
-
-      FlutterForegroundTask.sendDataToTask({
-        'type': 'sendCommand',
-        'value': _useWebSocket ? 'USE_WEBSOCKET:1' : 'USE_WEBSOCKET:0',
-      });
+      FlutterForegroundTask.sendDataToTask(_configMessage(port));
+      _sendProtocolCommand();
 
       debugPrint('[UI] Configuration sent to server task');
     } catch (e, stackTrace) {
@@ -430,6 +446,55 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
       setState(() {
         _running = false;
       });
+    }
+  }
+
+  // ---- transport selection (MQTT / WebSocket / Bluetooth) -----------------
+
+  Future<void> _adoptTransport(EspTransport next) async {
+    if (mounted) {
+      setState(() {
+        _transport = next;
+        _portController.text = next.defaultPort.toString();
+      });
+    }
+    final settings = await SettingsRepository.create();
+    await settings.setTransport(next);
+  }
+
+  Future<void> _onTransportChanged(EspTransport? next) async {
+    if (next == null || next == _transport || _busy) return;
+
+    // Not running: just remember the choice.
+    if (!_running) {
+      await _adoptTransport(next);
+      return;
+    }
+
+    // Running: move the ESP32s over first (the command travels over the
+    // current link), then restart the phone side with the new transport.
+    setState(() {
+      _busy = true;
+      _lastLog = 'Switching devices to ${next.label}...';
+    });
+    try {
+      if (next == EspTransport.bluetooth &&
+          !await requestBluetoothPermissions()) {
+        if (mounted) setState(() => _lastLog = 'Bluetooth permission denied');
+        return;
+      }
+
+      FlutterForegroundTask.sendDataToTask({
+        'type': 'sendCommand',
+        'value': next.espCommand,
+      });
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      await _stopServer();
+      await _adoptTransport(next);
+      await _startServer();
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -693,12 +758,14 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('This phone\'s IP address(es):', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 4),
-            if (_localIps.isEmpty)
-              const Text('Looking up...')
-            else
-              ..._localIps.map((ip) => Text(ip)),
+            if (_transport.usesPort) ...[
+              Text('This phone\'s IP address(es):', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 4),
+              if (_localIps.isEmpty)
+                const Text('Looking up...')
+              else
+                ..._localIps.map((ip) => Text(ip)),
+            ],
             const SizedBox(height: 4),
             const Text(
               'The service keeps running in the background (even if you swipe the app '
@@ -707,37 +774,48 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _portController,
-              enabled: !running,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Port'),
-            ),
-            const SizedBox(height: 12),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(_useWebSocket ? 'Protocol: WebSocket' : 'Protocol: MQTT'),
-              subtitle: Text(
-                _useWebSocket
-                    ? 'ESP32 connects via WebSocket (ws://)'
-                    : 'ESP32 connects via MQTT broker',
+            if (_transport.usesPort)
+              TextField(
+                controller: _portController,
+                enabled: !running,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Port'),
               ),
-              value: _useWebSocket,
-              onChanged: running
-                  ? null
-                  : (value) async {
-                      setState(() {
-                        _useWebSocket = value;
-                        _portController.text = value ? '8080' : '1883';
-                      });
-                      final settings = await SettingsRepository.create();
-                      await settings.setUseWebSocket(value);
-                    },
+            const SizedBox(height: 12),
+            Text('Connection', style: Theme.of(context).textTheme.labelLarge),
+            // RadioGroup.onChanged cannot be null, so "disabled" is done by
+            // blocking touches and dimming while a switch is in progress.
+            IgnorePointer(
+              ignoring: _busy,
+              child: Opacity(
+                opacity: _busy ? 0.5 : 1.0,
+                child: RadioGroup<EspTransport>(
+                  groupValue: _transport,
+                  onChanged: (value) {
+                    if (!_busy) _onTransportChanged(value);
+                  },
+                  child: Column(
+                    children: [
+                      for (final t in EspTransport.values)
+                        RadioListTile<EspTransport>(
+                          contentPadding: EdgeInsets.zero,
+                          value: t,
+                          title: Text(t.label),
+                          subtitle: Text(t.description),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _busy ? null : _toggleBroker,
-              child: Text(running ? 'Stop Server' : 'Start Server'),
+              child: Text(
+                _transport == EspTransport.bluetooth
+                    ? (running ? 'Stop Bluetooth' : 'Start Bluetooth')
+                    : (running ? 'Stop Server' : 'Start Server'),
+              ),
             ),
             const SizedBox(height: 4),
             Text('Connected clients: $_clientCount'),
