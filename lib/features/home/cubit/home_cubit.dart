@@ -42,23 +42,9 @@ class HomeCubit extends Cubit<HomeState> {
     _deviceSubscription = _deviceRepository
         .watchConnectedDevices(() => state.registeredMics.map((m) => m.id).toList())
         .listen((devices) {
-      final currentMics = [...state.registeredMics];
-
-      for (final deviceId in devices) {
-        if (!currentMics.any((m) => m.id == deviceId)) {
-          currentMics.add(RegisteredMic(
-            id: deviceId,
-            fullName: deviceId.startsWith('esp32-')
-                ? 'ESP32 (${deviceId.replaceFirst('esp32-', '')})'
-                : 'Mic ($deviceId)',
-          ));
-        }
-      }
-
-      emit(state.copyWith(
-        registeredMics: currentMics,
-        connectedDevices: devices,
-      ));
+      // Devices are NOT registered automatically any more - the user adds
+      // them manually from the Register Mic screen.
+      emit(state.copyWith(connectedDevices: devices));
     });
   }
 
@@ -267,7 +253,12 @@ class HomeState {
 
   bool get useWebSocket => transport == EspTransport.websocket;
 
-  bool isActive(String slot) => connectedDevices.contains(slot);
+  /// A slot is active when a connected device matches it, whether the device
+  /// id is "esp32-AABBCCDDEEFF" or the bare MAC "AABBCCDDEEFF".
+  bool isActive(String slot) {
+    final key = normalizeMicId(slot);
+    return connectedDevices.any((d) => d == slot || normalizeMicId(d) == key);
+  }
   bool isRecording(String slot) => recordingSlots.contains(slot);
   String? tagFor(String slot) => tags[slot];
   String? labelFor(String slot) => tagLabels[slot];

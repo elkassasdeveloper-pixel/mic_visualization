@@ -21,6 +21,7 @@ class MicRegistrationScreen extends StatelessWidget {
 
 class _MicRegistrationView extends StatelessWidget {
   const _MicRegistrationView();
+
   Future<void> _showOtpDialog(BuildContext context) async {
     final cubit = context.read<MicRegistrationCubit>();
     String currentOtp = '';
@@ -75,6 +76,17 @@ class _MicRegistrationView extends StatelessWidget {
       cubit.register();
     }
   }
+
+  void _onRegisterPressed(BuildContext context) {
+    final cubit = context.read<MicRegistrationCubit>();
+    final error = cubit.validate();
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+    _showOtpDialog(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocListener<MicRegistrationCubit, MicRegistrationState>(
@@ -106,15 +118,41 @@ class _MicRegistrationView extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('Connected devices',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    if (state.availableDevices.isEmpty)
+                      const Text(
+                        'No unregistered device is connected right now. '
+                            'Connect one, or type its MAC address below.',
+                      )
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final id in state.availableDevices)
+                            ChoiceChip(
+                              label: Text(id),
+                              selected: state.micId == id,
+                              onSelected: (_) => cubit.selectDevice(id),
+                            ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
                     TextField(
-                      controller: state.userIdController,
-                      readOnly: true,
-                      decoration: const InputDecoration(labelText: 'User ID'),
-                      onTap: cubit.selectAllUserId,
+                      controller: cubit.macController,
+                      onChanged: cubit.setMicId,
+                      onTap: cubit.selectAllMac,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'MAC address (User ID)',
+                        helperText: 'Without "esp32-", e.g. AABBCCDDEEFF',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: state.passwordController,
+                      controller: cubit.passwordController,
                       readOnly: true,
                       decoration: const InputDecoration(labelText: 'Password'),
                       onTap: cubit.selectAllPassword,
@@ -126,14 +164,7 @@ class _MicRegistrationView extends StatelessWidget {
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: state.isSubmitting ? null : () {
-                        if (cubit.state.fullName.trim().isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Full name is required')),
-                          );
-                          return;
-                        }
-                        _showOtpDialog(context);},
+                      onPressed: state.isSubmitting ? null : () => _onRegisterPressed(context),
                       child: state.isSubmitting
                           ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Text('Register'),
