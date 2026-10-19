@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
+import 'package:mic_visualization/data/models/registered_mic.dart';
 import 'package:mic_visualization/features/home/data/mic_device_repository.dart';
 import 'package:mic_visualization/features/home/data/mic_recording_repository.dart';
 import 'package:mic_visualization/features/home/data/parec_mic_recording_repository.dart';
@@ -41,8 +42,11 @@ class CompositeMicDeviceRepository implements MicDeviceRepository {
     );
 
     _localSub?.cancel();
+    // ESP32 slots never map to a local microphone, so the local repository
+    // only gets to see the non-ESP slots.
     _localSub = _localRepository
-        .watchConnectedDevices(getSlotIds)
+        .watchConnectedDevices(
+            () => getSlotIds().where((s) => !isEspMicId(s)).toList())
         .listen((localDevices) {
       _emitCombined(localDevices);
     });
@@ -63,22 +67,18 @@ class CompositeMicDeviceRepository implements MicDeviceRepository {
     final slotIds = _currentGetSlotIds?.call() ?? [];
     final combined = <String>{...localDevices};
 
-    // Include connected MQTT clients that match any slot or directly
+    // Connected network clients ("esp32-<MAC>"): show the registered slot that
+    // belongs to the same MAC, otherwise the raw client id so it can be
+    // registered from the Register Mic screen.
     for (final client in _mqttClients) {
-      if (slotIds.contains(client)) {
+      final key = normalizeMicId(client);
+      final matches = slotIds
+          .where((slot) => slot == client || normalizeMicId(slot) == key)
+          .toList();
+      if (matches.isEmpty) {
         combined.add(client);
       } else {
-        // Match substring or slot ID prefix/suffix if configured
-        bool matched = false;
-        for (final slot in slotIds) {
-          if (slot == client || client.contains(slot) || slot.contains(client)) {
-            combined.add(slot);
-            matched = true;
-          }
-        }
-        if (!matched) {
-          combined.add(client);
-        }
+        combined.addAll(matches);
       }
     }
 
@@ -90,7 +90,10 @@ class CompositeMicDeviceRepository implements MicDeviceRepository {
   @override
   Future<InputDevice?> deviceForSlot(
       String slot, List<String> slotIds) {
-    return _localRepository.deviceForSlot(slot, slotIds);
+    // An ESP32 streams its own audio; it must never be tied to a phone mic.
+    if (isEspMicId(slot)) return Future.value(null);
+    return _localRepository.deviceForSlot(
+        slot, slotIds.where((s) => !isEspMicId(s)).toList());
   }
 }
 
@@ -127,21 +130,23 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
   void _handleMqttAudioBytes(String clientId, List<int> bytes) {
     if (bytes.length < 2 || bytes.length % 2 != 0) return;
 
-    // Find target recording slots that should receive this audio stream
+    // Route the audio to the slot registered for the SAME device (same MAC).
+    final key = normalizeMicId(clientId);
     final targetSlots = <String>{};
 
     for (final slot in _recordingSlots) {
-      if (slot == clientId ||
-          (clientId.isNotEmpty &&
-              (slot.contains(clientId) || clientId.contains(slot)))) {
+      if (slot == clientId || (key.isNotEmpty && normalizeMicId(slot) == key)) {
         targetSlots.add(slot);
       }
     }
 
-    // Fallback: If no exact slot match, feed audio to all active recording slots
-    if (targetSlots.isEmpty && _recordingSlots.isNotEmpty) {
-      targetSlots.addAll(_recordingSlots);
+    // Fallback for old slots that are not tied to a MAC (e.g. uuid-registered):
+    // never feed another ESP32's audio into a MAC-registered slot.
+    if (targetSlots.isEmpty) {
+      targetSlots.addAll(_recordingSlots.where((s) => !isEspMicId(s)));
     }
+
+    if (targetSlots.isEmpty) return;
 
     for (final slot in targetSlots) {
       final buffer = _mqttBuffers.putIfAbsent(slot, () => []);
@@ -175,11 +180,13 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
     final controller = _windowControllers.putIfAbsent(
         slot, () => StreamController<List<double>>.broadcast());
 
-    final localStream = _localRepository.windowsFor(slot);
+    // ESP32 slots get audio only from the network, never from a local mic.
+    final localStream =
+    isEspMicId(slot) ? null : _localRepository.windowsFor(slot);
     StreamSubscription<List<double>>? localSub;
 
     controller.onListen = () {
-      localSub = localStream.listen(
+      localSub = localStream?.listen(
             (window) {
           if (!controller.isClosed) controller.add(window);
         },
@@ -201,7 +208,9 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
     _recordingSlots.add(slot);
     _mqttBuffers[slot] = [];
     try {
-      await _localRepository.startRecording(slot, device);
+      if (!isEspMicId(slot)) {
+        await _localRepository.startRecording(slot, device);
+      }
     } catch (e) {
       debugPrint('[CompositeRecording] Local recorder start note: $e');
     }
@@ -212,7 +221,9 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
     _recordingSlots.remove(slot);
     _mqttBuffers.remove(slot);
     try {
-      await _localRepository.stopRecording(slot);
+      if (!isEspMicId(slot)) {
+        await _localRepository.stopRecording(slot);
+      }
     } catch (e) {
       debugPrint('[CompositeRecording] Local recorder stop note: $e');
     }

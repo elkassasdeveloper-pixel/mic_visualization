@@ -22,3 +22,12 @@ String normalizeMicId(String raw) {
       ? compact.toUpperCase()
       : s;
 }
+
+/// True for ids that belong to an ESP32 streaming over the network
+/// ("esp32-MAC" or a bare 12-digit MAC). Such a slot must only ever receive
+/// that device's own audio, never a phone microphone.
+bool isEspMicId(String id) {
+  final s = id.trim();
+  if (s.toLowerCase().startsWith('esp32-')) return true;
+  return RegExp(r'^[0-9A-Fa-f]{12}$').hasMatch(s.replaceAll(RegExp(r'[:\-\s]'), ''));
+}

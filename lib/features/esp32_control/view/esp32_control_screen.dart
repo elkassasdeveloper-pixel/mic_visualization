@@ -207,6 +207,12 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
         break;
 
       case 'audio':
+      // Only play / visualize the device picked in the dropdown.
+        final from = data['clientId'] as String? ?? '';
+        if (_selectedMac != _allDevices &&
+            from != '$_clientIdPrefix$_selectedMac') {
+          break;
+        }
         _handleAudio((data['value'] as List).cast<int>());
         break;
     }
@@ -620,8 +626,11 @@ class _Esp32ControlScreenState extends State<Esp32ControlScreen> with WidgetsBin
                 isExpanded: true,
                 value: _selectedMac,
                 onChanged: _running
-                    ? (value) =>
-                    setState(() => _selectedMac = value ?? _allDevices)
+                    ? (value) {
+                  setState(() => _selectedMac = value ?? _allDevices);
+                  // drop audio already queued from the previous device
+                  _releasePcm();
+                }
                     : null,
                 // What the closed dropdown shows (single line).
                 selectedItemBuilder: (context) => [

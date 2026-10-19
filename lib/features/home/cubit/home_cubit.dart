@@ -11,6 +11,7 @@ import 'package:mic_visualization/data/models/login_response.dart';
 import 'package:mic_visualization/data/models/registered_mic.dart';
 import 'package:mic_visualization/data/repositories/classification_repository.dart';
 import 'package:mic_visualization/data/repositories/realtime_repository.dart';
+import 'package:mic_visualization/data/services/auth_api_service.dart';
 import 'package:mic_visualization/data/services/ble_permissions.dart';
 import 'package:mic_visualization/data/services/cloud_api_service.dart';
 import 'package:mic_visualization/data/services/fugo_message_service.dart';
@@ -42,9 +43,8 @@ class HomeCubit extends Cubit<HomeState> {
     _deviceSubscription = _deviceRepository
         .watchConnectedDevices(() => state.registeredMics.map((m) => m.id).toList())
         .listen((devices) {
-      // Devices are NOT registered automatically any more - the user adds
-      // them manually from the Register Mic screen.
       emit(state.copyWith(connectedDevices: devices));
+      _autoRegisterConnected(devices);
     });
   }
 
@@ -57,6 +57,9 @@ class HomeCubit extends Cubit<HomeState> {
   final SettingsRepository _settings;
   final Map<String, String> _slotTokens;
   final Map<String, String> _fugoTokens;
+
+  /// Device ids we already tried to log in with since they last connected.
+  final Set<String> _autoLoginTried = {};
 
   late final StreamSubscription<List<String>> _deviceSubscription;
   final Map<String, StreamSubscription<List<double>>> _windowSubscriptions = {};
@@ -194,6 +197,48 @@ class HomeCubit extends Cubit<HomeState> {
         'transport': transport.id,
         'useWebSocket': transport == EspTransport.websocket,
       });
+    }
+  }
+
+  /// When an ESP32 connects, try to log in with its MAC (user id = password).
+  /// Success  -> the device is already known to the server, so register it here.
+  /// Failure  -> leave it for manual registration (Register Mic screen).
+  void _autoRegisterConnected(List<String> devices) {
+    final present = <String>{};
+
+    for (final device in devices) {
+      if (!isEspMicId(device)) continue; // local microphones are not auto-registered
+      final id = normalizeMicId(device);
+      present.add(id);
+
+      if (_autoLoginTried.contains(id)) continue;
+      if (state.registeredMics.any((m) => normalizeMicId(m.id) == id)) continue;
+
+      _autoLoginTried.add(id);
+      _tryAutoRegister(id);
+    }
+
+    // Forget devices that went away, so a reconnect gets a fresh attempt.
+    _autoLoginTried.retainAll(present);
+  }
+
+  Future<void> _tryAutoRegister(String id) async {
+    try {
+      final login = await AuthApiService().login(userName: id, password: id);
+      if (isClosed) return;
+
+      if (!login.isSuccess) {
+        debugPrint('[HomeCubit] $id has no account yet - register it manually');
+        return;
+      }
+
+      // It may have been registered by hand while the login was running.
+      if (state.registeredMics.any((m) => normalizeMicId(m.id) == id)) return;
+
+      debugPrint('[HomeCubit] $id logged in - registering automatically');
+      await registerMic(RegisteredMic(id: id, fullName: 'ESP32 ($id)'), login);
+    } catch (e) {
+      debugPrint('[HomeCubit] auto-register failed for $id: $e');
     }
   }
 
