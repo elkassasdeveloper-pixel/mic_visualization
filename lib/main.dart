@@ -18,7 +18,7 @@ import 'package:mic_visualization/data/services/database_ffi.dart';
 void main() async{
   WidgetsFlutterBinding.ensureInitialized();
   // Required before runApp() when using flutter_foreground_task (Android only).
-  if (!kIsWeb && Platform.isAndroid) {
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     FlutterForegroundTask.initCommunicationPort();
   }
   initializeDatabaseFfi();

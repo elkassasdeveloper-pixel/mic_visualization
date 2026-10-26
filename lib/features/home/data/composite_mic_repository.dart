@@ -30,12 +30,12 @@ class CompositeMicDeviceRepository implements MicDeviceRepository {
 
     _controller ??= StreamController<List<String>>.broadcast(
       onListen: () {
-        if (!kIsWeb && Platform.isAndroid) {
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           FlutterForegroundTask.addTaskDataCallback(_onTaskData);
         }
       },
       onCancel: () {
-        if (!kIsWeb && Platform.isAndroid) {
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
         }
       },
@@ -106,7 +106,7 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
       (Platform.isLinux
           ? ParecMicRecordingRepository()
           : RecordBackedMicRecordingRepository()) {
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     }
   }
@@ -231,7 +231,7 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
 
   @override
   Future<void> disposeAll() async {
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     }
     await _localRepository.disposeAll();

@@ -116,7 +116,7 @@ class HomeScreen extends StatelessWidget {
 
   /// ESP32 provisioning/broker features rely on Android-only plugins
   /// (foreground service + SmartConfig), so the entry is hidden elsewhere.
-  bool get _esp32Supported => !kIsWeb && Platform.isAndroid;
+  bool get _esp32Supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   Widget _buildDrawer(
       BuildContext context,

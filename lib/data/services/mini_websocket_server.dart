@@ -145,7 +145,10 @@ class MiniWebSocketServer {
 
   Future<void> _startAnnouncing(int port) async {
     final ip = await _pickWifiIPv4();
-    if (ip == null) return;
+    if (ip == null) {
+      _log('Could not determine local IP - sever announcement disabled');
+      return;
+    }
 
     try {
       _announceSocket = await RawDatagramSocket.bind(InternetAddress(ip), 0);
@@ -159,14 +162,29 @@ class MiniWebSocketServer {
     final targets = <InternetAddress>[
       InternetAddress('255.255.255.255'),
     ];
-
+    final parts = ip.split('.');
+    if(parts.length == 4){
+      targets.add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
+    }
+var errorLogged = false;
     _announceTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       for (final target in targets) {
         try {
-          _announceSocket?.send(message, target, discoveryPort);
-        } catch (_) {}
+        final sent = _announceSocket?.send(message, target, discoveryPort);
+        if(sent == 0 && !errorLogged){
+          errorLogged = true;
+          _log('Discovery broadcast to ${target.address} was not sent');
+        }
+        } catch (e) {
+          if(!errorLogged){
+            errorLogged = true;
+            _log('Discovery broadcast to ${target.address} failed $e');
+          }
+        }
       }
     });
+    _log('Announcing websocket server $ip $port to '
+    '${targets.map((t) => t.address).join(', ')} on UDP:$discoveryPort');
   }
 
   static bool _isPrivateIPv4(String a) =>

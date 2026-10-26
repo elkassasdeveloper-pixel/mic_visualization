@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -42,6 +43,7 @@ class BleAudioClient {
   static final Guid serviceUuid = Guid('6e400001-b5a3-f393-e0a9-e50e24dcca9e');
   static final Guid rxUuid = Guid('6e400002-b5a3-f393-e0a9-e50e24dcca9e'); // commands
   static final Guid audioUuid = Guid('6e400004-b5a3-f393-e0a9-e50e24dcca9e'); // u-law audio
+  static final Guid idUuid = Guid('6e400005-b5a3-f393-e0a9-e50e24dcca9e');
 
   // Playback jitter buffer: first chunk after ~200 ms, then ~100 ms chunks.
   static const int _firstEmitBytes = 6400;
@@ -161,25 +163,26 @@ class BleAudioClient {
     // The firmware advertises its name as "esp32-<MAC>", the same id it uses
     // for MQTT/WebSocket, so a mic keeps its identity across transports.
     final advName = r.advertisementData.advName;
-    final clientId = advName.startsWith('esp32-')
+    var clientId = advName.startsWith('esp32-')
         ? advName
-        : 'esp32-${key.replaceAll(':', '').toUpperCase()}';
+        : '';
 
     try {
-      _log('Connecting to $clientId...');
+      _log('Connecting to ${advName.isNotEmpty ? advName : key}...');
       await device.connect(
         license: License.nonprofit,
         timeout: const Duration(seconds: 15),
         mtu: 247,
       );
-      await device.requestConnectionPriority(
-          connectionPriorityRequest: ConnectionPriority.high);
-
+      if(Platform.isAndroid) {
+        await device.requestConnectionPriority(
+            connectionPriorityRequest: ConnectionPriority.high);
+      }
       final services = await device.discoverServices();
       final svc = services.firstWhere((s) => s.uuid == serviceUuid);
       final rx = svc.characteristics.firstWhere((c) => c.uuid == rxUuid);
       final audio = svc.characteristics.firstWhere((c) => c.uuid == audioUuid);
-
+      clientId = await _resolveClientId(device, svc, clientId, key);
       final peer = _Peer(clientId, device, rx);
       peer.connSub = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected) _drop(key);
@@ -203,6 +206,27 @@ class BleAudioClient {
     } finally {
       _connecting = false;
     }
+  }
+
+  /// "esp32-MAC": from the id characteristic, else the advertised name,
+  /// else the connected device name, else (last resort) the remote id.
+  Future<String> _resolveClientId(
+      BluetoothDevice device,
+      BluetoothService svc,
+      String known,
+      String key,
+      ) async {
+    for (final c in svc.characteristics) {
+      if (c.uuid != idUuid) continue;
+      try {
+        final text = utf8.decode(await c.read()).trim();
+        if (text.startsWith('esp32-')) return text;
+      } catch (_) {}
+    }
+    if (known.startsWith('esp32-')) return known;
+    final name = device.platformName;
+    if (name.startsWith('esp32-')) return name;
+    return 'esp32-${key.replaceAll(':', '').replaceAll('-', '').toUpperCase()}';
   }
 
   void _drop(String key) {

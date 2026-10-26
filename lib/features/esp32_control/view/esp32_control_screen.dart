@@ -941,22 +941,32 @@ class _SmartConfigScreenState extends State<SmartConfigScreen> {
       });
     });
 
+    String? error;   // add before the `try`
+
     try {
-      await provisioner.start(ProvisioningRequest.fromStrings(
+      final request = (bssid == null || bssid.isEmpty)
+          ? ProvisioningRequest.fromStrings(
         ssid: _ssidController.text,
-        bssid: bssid ?? '',
         password: _passwordController.text,
-      ));
+      )
+          : ProvisioningRequest.fromStrings(
+        ssid: _ssidController.text,
+        bssid: bssid,
+        password: _passwordController.text,
+      );
+      await provisioner.start(request);
 
       setState(() => _status = 'Broadcasting credentials...');
       await Future.delayed(const Duration(seconds: 30));
     } catch (e) {
+      error = '$e';
+      debugPrint('[SmartConfig] start failed: $e');
       setState(() => _status = 'Error: $e');
     } finally {
       provisioner.stop();
       setState(() {
         _isProvisioning = false;
-        if (_connectedDevices.isEmpty && _status != 'Error') {
+        if (error == null && _connectedDevices.isEmpty) {
           _status = 'Finished - no devices confirmed connection';
         }
       });

@@ -170,7 +170,7 @@ class HomeCubit extends Cubit<HomeState> {
     if (transport == state.transport) return;
 
     final serviceRunning =
-        !kIsWeb && Platform.isAndroid && await FlutterForegroundTask.isRunningService;
+        !kIsWeb && (Platform.isAndroid || Platform.isIOS) && await FlutterForegroundTask.isRunningService;
 
     if (serviceRunning &&
         transport == EspTransport.bluetooth &&
