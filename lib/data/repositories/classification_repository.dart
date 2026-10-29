@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
-import 'package:mic_visualization/data/local/app_database.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/data/local/app_database.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
 
 abstract class ClassificationRepository {
   Future<void> insert(ClassificationRecord record);

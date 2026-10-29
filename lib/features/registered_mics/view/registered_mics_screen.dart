@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
-import 'package:mic_visualization/features/registered_mics/data/registered_mics_data_source.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/features/registered_mics/data/registered_mics_data_source.dart';
 
 class RegisteredMicsScreen extends StatelessWidget {
   const RegisteredMicsScreen({super.key});

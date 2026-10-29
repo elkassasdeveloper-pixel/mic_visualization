@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_litert/flutter_litert.dart';
-import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
+import 'package:hodhd_visualization/core/constants/audio_tagging_config.dart';
 
 class AudioTaggingService {
   AudioTaggingService._(

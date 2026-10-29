@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:mic_visualization/data/models/esp_transport.dart';
+import 'package:hodhd_visualization/data/models/esp_transport.dart';
+import 'package:hodhd_visualization/data/security/secure_channel.dart';
 
 import 'ble_audio_client.dart';
 import 'mini_mqtt_broker.dart';
@@ -22,6 +24,7 @@ class BrokerTaskHandler extends TaskHandler {
   StreamSubscription<int>? _clientCountSub;
   StreamSubscription<List<String>>? _clientIdsSub;
   StreamSubscription<MqttAudioChunk>? _audioSub;
+  StreamSubscription<MqttAudioChunk>? _videoSub;
 
   int _port = 1883;
   EspTransport _transport = EspTransport.mqtt;
@@ -29,6 +32,9 @@ class BrokerTaskHandler extends TaskHandler {
   bool _started = false;
   bool _starting = false; // guards against two setConfig messages racing
   String _lastLog = '';
+  SecureChannel? _secure;
+  int _dropped = 0;
+  int _droppedVideo = 0;
 
   String get _transportName => switch (_transport) {
     EspTransport.mqtt => 'MQTT broker',
@@ -58,13 +64,13 @@ class BrokerTaskHandler extends TaskHandler {
     switch (_transport) {
       case EspTransport.websocket:
         _bind(_wsServer.logStream, _wsServer.clientCountStream,
-            _wsServer.clientIdsStream, _wsServer.audioStream);
+            _wsServer.clientIdsStream, _wsServer.audioStream, _wsServer.videoStream);
       case EspTransport.bluetooth:
         _bind(_bleClient.logStream, _bleClient.clientCountStream,
-            _bleClient.clientIdsStream, _bleClient.audioStream);
+            _bleClient.clientIdsStream, _bleClient.audioStream, _bleClient.videoStream);
       case EspTransport.mqtt:
         _bind(_mqttBroker.logStream, _mqttBroker.clientCountStream,
-            _mqttBroker.clientIdsStream, _mqttBroker.audioStream);
+            _mqttBroker.clientIdsStream, _mqttBroker.audioStream, _mqttBroker.videoStream);
     }
   }
 
@@ -73,11 +79,13 @@ class BrokerTaskHandler extends TaskHandler {
       Stream<int> count,
       Stream<List<String>> ids,
       Stream<MqttAudioChunk> audio,
+      Stream<MqttAudioChunk> video,
       ) {
     _logSub = log.listen(_onLog);
     _clientCountSub = count.listen(_onClientCount);
     _clientIdsSub = ids.listen(_onClientIds);
     _audioSub = audio.listen(_onAudioChunk);
+    _videoSub = video.listen(_onVideoFrame);
   }
 
   void _cancelSubscriptions() {
@@ -85,6 +93,7 @@ class BrokerTaskHandler extends TaskHandler {
     _clientCountSub?.cancel();
     _clientIdsSub?.cancel();
     _audioSub?.cancel();
+    _videoSub?.cancel();
   }
 
   void _onLog(String msg) {
@@ -111,12 +120,97 @@ class BrokerTaskHandler extends TaskHandler {
   }
 
   void _onAudioChunk(MqttAudioChunk chunk) {
+    var payload = chunk.payload;
+    final secure = _secure;
+    // Bluetooth packets are already decrypted inside BleAudioClient.
+    if (secure != null && _transport != EspTransport.bluetooth) {
+      final plain = secure.decryptUplink(chunk.clientId, payload);
+      if (plain == null) {
+        if (_dropped++ % 100 == 0) {
+          _onLog('Dropped audio from ${chunk.clientId}: wrong key or replayed packet ($_dropped so far)');
+        }
+        return;
+      }
+      payload = plain;
+    }
     FlutterForegroundTask.sendDataToMain({
       'type': 'audio',
-      'value': chunk.payload,
+      'value': payload,
       'clientId': chunk.clientId,
     });
   }
+
+  void _onVideoFrame(MqttAudioChunk chunk) {
+    var payload = chunk.payload;
+    final secure = _secure;
+    // Bluetooth frames are already reassembled and decrypted in BleAudioClient.
+    if (secure != null && _transport != EspTransport.bluetooth) {
+      final plain = secure.decryptVideo(chunk.clientId, payload);
+      if (plain == null) {
+        if (_droppedVideo++ % 20 == 0) {
+          _onLog('Dropped camera frame from ${chunk.clientId}: wrong key or replayed packet ($_droppedVideo so far)');
+        }
+        return;
+      }
+      payload = plain;
+    }
+    FlutterForegroundTask.sendDataToMain({
+      'type': 'video',
+      'value': payload,
+      'clientId': chunk.clientId,
+    });
+  }
+
+  void _applySecret(String? b64) {
+    SecureChannel? channel;
+    if (b64 != null && b64.isNotEmpty) {
+      final key = base64Decode(b64);
+      if (key.length == 32) channel = SecureChannel(key);
+    }
+    _secure = channel;
+    _bleClient.channel = channel;
+    final String Function(String)? sign = channel?.signDiscovery;
+    _mqttBroker.signDiscovery = sign;
+    _wsServer.signDiscovery = sign;
+    _onLog(channel == null
+        ? 'Security: no key set - traffic is NOT encrypted'
+        : 'Security: encryption ON (key ${channel.fingerprint})');
+  }
+
+  void _sendCommand(String command, String? target) {
+    final secure = _secure;
+    if (secure == null) {
+      switch (_transport) {
+        case EspTransport.websocket:
+          _wsServer.sendString(command, targetClientId: target);
+        case EspTransport.bluetooth:
+          _bleClient.sendString(command, targetClientId: target);
+        case EspTransport.mqtt:
+          _mqttBroker.publishString('esp32/cmd', command, targetClientId: target);
+      }
+      return;
+    }
+
+    // One encrypted packet per device (each device has its own key).
+    final ids = target != null ? [target] : _connectedIds();
+    for (final id in ids) {
+      final packet = secure.encryptCommand(id, command);
+      switch (_transport) {
+        case EspTransport.websocket:
+          _wsServer.sendBytes(packet, targetClientId: id);
+        case EspTransport.bluetooth:
+          _bleClient.sendBytes(packet, targetClientId: id);
+        case EspTransport.mqtt:
+          _mqttBroker.publish('esp32/cmd', packet, targetClientId: id);
+      }
+    }
+  }
+
+  List<String> _connectedIds() => switch (_transport) {
+    EspTransport.websocket => _wsServer.connectedClientIds,
+    EspTransport.bluetooth => _bleClient.connectedClientIds,
+    EspTransport.mqtt => _mqttBroker.connectedClientIds,
+  };
 
   Future<void> _startBroker() async {
     if (_started || _starting) {
@@ -271,22 +365,14 @@ class BrokerTaskHandler extends TaskHandler {
         _sendStatus();
         break;
 
+      case 'setSecret':
+        _applySecret(data['value'] as String?);
+        break;
+
       case 'sendCommand':
         final command = data['value'] as String?;
         final cmdTarget = data['target'] as String?;
-
-        if (command != null) {
-          debugPrint('[BrokerTaskHandler] Sending command: $command');
-          switch (_transport) {
-            case EspTransport.websocket:
-              _wsServer.sendString(command, targetClientId: cmdTarget);
-            case EspTransport.bluetooth:
-              _bleClient.sendString(command, targetClientId: cmdTarget);
-            case EspTransport.mqtt:
-              _mqttBroker.publishString('esp32/cmd', command,
-                  targetClientId: cmdTarget);
-          }
-        }
+        if (command != null) _sendCommand(command, cmdTarget);
         break;
 
       case 'stop':

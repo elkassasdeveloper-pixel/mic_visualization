@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
-import 'package:mic_visualization/data/repositories/classification_repository.dart';
-import 'package:mic_visualization/features/tags_history/cubit/tags_history_cubit.dart';
-import 'package:mic_visualization/features/tags_history/data/classification_data_source.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/repositories/classification_repository.dart';
+import 'package:hodhd_visualization/features/tags_history/cubit/tags_history_cubit.dart';
+import 'package:hodhd_visualization/features/tags_history/data/classification_data_source.dart';
 import 'package:syncfusion_flutter_core/theme.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mic_visualization/core/constants/tag_images.dart';
-import 'package:mic_visualization/features/home/widgets/mic_icon_button.dart';
+import 'package:hodhd_visualization/core/constants/tag_images.dart';
+import 'package:hodhd_visualization/features/home/widgets/mic_icon_button.dart';
 
 class DraggableMicButton extends StatelessWidget {
   const DraggableMicButton({

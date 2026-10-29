@@ -1,5 +1,5 @@
-import 'package:mic_visualization/data/models/login_response.dart';
-import 'package:mic_visualization/data/services/auth_api_service.dart';
+import 'package:hodhd_visualization/data/models/login_response.dart';
+import 'package:hodhd_visualization/data/services/auth_api_service.dart';
 
 abstract class AuthRepository {
   Future<LoginResponse> login({required String userName, required String password});

@@ -20,11 +20,16 @@ class MiniWebSocketServer {
   StreamController<List<String>>.broadcast();
   final StreamController<MqttAudioChunk> _audioController =
   StreamController<MqttAudioChunk>.broadcast();
+  final StreamController<MqttAudioChunk> _videoController =
+  StreamController<MqttAudioChunk>.broadcast();
 
   Stream<String> get logStream => _logController.stream;
   Stream<int> get clientCountStream => _clientCountController.stream;
   Stream<List<String>> get clientIdsStream => _clientIdsController.stream;
   Stream<MqttAudioChunk> get audioStream => _audioController.stream;
+
+  /// Camera frames: binary messages tagged 0x02.
+  Stream<MqttAudioChunk> get videoStream => _videoController.stream;
 
   List<String> get connectedClientIds => (_clients.values
       .where((id) => id.isNotEmpty)
@@ -40,6 +45,9 @@ class MiniWebSocketServer {
 
   int get connectedClientCount => _clients.length;
   bool get isRunning => _server != null;
+
+  /// Set by the task handler: appends the authentication tag to announcements.
+  String Function(String body)? signDiscovery;
 
   Future<void> start(int port) async {
     if (_server != null) return;
@@ -78,11 +86,19 @@ class MiniWebSocketServer {
     socket.listen(
           (data) {
         if (data is List<int>) {
-          if (!_audioController.isClosed) {
-            _audioController.add(MqttAudioChunk(
-              clientId: _clients[socket] ?? clientId,
-              payload: data,
-            ));
+          // Binary frames start with a type byte: 0x01 audio, 0x02 camera frame.
+          if (data.length < 2) return;
+          final type = data[0];
+          final payload = data.sublist(1);
+          final id = _clients[socket] ?? clientId;
+          if (type == 0x02) {
+            if (!_videoController.isClosed) {
+              _videoController.add(MqttAudioChunk(clientId: id, payload: payload));
+            }
+          } else if (type == 0x01) {
+            if (!_audioController.isClosed) {
+              _audioController.add(MqttAudioChunk(clientId: id, payload: payload));
+            }
           }
         } else if (data is String) {
           try {
@@ -130,6 +146,18 @@ class MiniWebSocketServer {
     } catch (_) {}
   }
 
+  /// Sends an already-encrypted packet as a binary frame.
+  void sendBytes(List<int> payload, {String? targetClientId}) {
+    for (final entry in _clients.entries.toList()) {
+      if (targetClientId != null && entry.value != targetClientId) continue;
+      try {
+        entry.key.add(payload);
+      } catch (e) {
+        _log('Error sending to WS client ${entry.value}: $e');
+      }
+    }
+  }
+
   void sendString(String payload, {String? targetClientId}) {
     for (final entry in _clients.entries.toList()) {
       if (targetClientId != null && entry.value != targetClientId) {
@@ -145,7 +173,10 @@ class MiniWebSocketServer {
 
   Future<void> _startAnnouncing(int port) async {
     final ip = await _pickWifiIPv4();
-    if (ip == null) return;
+    if (ip == null) {
+      _log('Could not determine local IP - server announcement disabled');
+      return;
+    }
 
     try {
       _announceSocket = await RawDatagramSocket.bind(InternetAddress(ip), 0);
@@ -155,18 +186,37 @@ class MiniWebSocketServer {
     }
     _announceSocket?.broadcastEnabled = true;
 
-    final message = utf8.encode('WS_SERVER:$ip:$port');
-    final targets = <InternetAddress>[
-      InternetAddress('255.255.255.255'),
-    ];
+    final body = 'WS_SERVER:$ip:$port';
 
+    // Limited broadcast + subnet-directed broadcast (assumes a /24 network,
+    // which is what home routers use). Some routers/APs/OSes drop one of them.
+    final targets = <InternetAddress>[InternetAddress('255.255.255.255')];
+    final parts = ip.split('.');
+    if (parts.length == 4) {
+      targets.add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
+    }
+
+    var errorLogged = false;
     _announceTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      final message = utf8.encode(signDiscovery?.call(body) ?? body);
       for (final target in targets) {
         try {
-          _announceSocket?.send(message, target, discoveryPort);
-        } catch (_) {}
+          final sent = _announceSocket?.send(message, target, discoveryPort);
+          if (sent == 0 && !errorLogged) {
+            errorLogged = true;
+            _log('Discovery broadcast to ${target.address} was not sent');
+          }
+        } catch (e) {
+          if (!errorLogged) {
+            errorLogged = true;
+            _log('Discovery broadcast to ${target.address} failed: $e');
+          }
+        }
       }
     });
+
+    _log('Announcing WebSocket server $ip:$port to '
+        '${targets.map((t) => t.address).join(', ')} on UDP:$discoveryPort');
   }
 
   static bool _isPrivateIPv4(String a) =>
@@ -221,6 +271,7 @@ class MiniWebSocketServer {
     _clientCountController.close();
     _clientIdsController.close();
     _audioController.close();
+    _videoController.close();
   }
 
   void _log(String message) {

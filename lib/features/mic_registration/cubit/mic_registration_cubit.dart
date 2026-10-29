@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
-import 'package:mic_visualization/data/services/auth_api_service.dart';
-import 'package:mic_visualization/data/services/sysuser_api_service.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/services/auth_api_service.dart';
+import 'package:hodhd_visualization/data/services/sysuser_api_service.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
 
 class MicRegistrationCubit extends Cubit<MicRegistrationState> {
   MicRegistrationCubit(this._homeCubit, this._token)

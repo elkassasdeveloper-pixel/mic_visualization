@@ -1,5 +1,5 @@
 import 'package:dio/dio.dart';
-import 'package:mic_visualization/core/constants/api_endpoints.dart';
+import 'package:hodhd_visualization/core/constants/api_endpoints.dart';
 
 class SysUserApiService {
   SysUserApiService({Dio? dio}) : _dio = dio ?? Dio(BaseOptions(baseUrl: ApiEndpoints.baseUrl));

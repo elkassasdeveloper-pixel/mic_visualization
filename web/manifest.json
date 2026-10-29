@@ -1,6 +1,6 @@
 {
-    "name": "mic_visualization",
-    "short_name": "mic_visualization",
+    "name": "hodhd_visualization",
+    "short_name": "hodhd_visualization",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#hexcode",

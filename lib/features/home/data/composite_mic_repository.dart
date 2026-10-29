@@ -3,12 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
-import 'package:mic_visualization/features/home/data/mic_device_repository.dart';
-import 'package:mic_visualization/features/home/data/mic_recording_repository.dart';
-import 'package:mic_visualization/features/home/data/parec_mic_recording_repository.dart';
-import 'package:mic_visualization/features/home/data/record_backed_mic_recording_repository.dart';
+import 'package:hodhd_visualization/core/constants/audio_tagging_config.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/features/home/data/mic_device_repository.dart';
+import 'package:hodhd_visualization/features/home/data/mic_recording_repository.dart';
+import 'package:hodhd_visualization/features/home/data/parec_mic_recording_repository.dart';
+import 'package:hodhd_visualization/features/home/data/record_backed_mic_recording_repository.dart';
 import 'package:record/record.dart';
 
 /// Device repository that merges connected local microphones and connected
@@ -30,12 +30,12 @@ class CompositeMicDeviceRepository implements MicDeviceRepository {
 
     _controller ??= StreamController<List<String>>.broadcast(
       onListen: () {
-        if (!kIsWeb && Platform.isAndroid) {
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           FlutterForegroundTask.addTaskDataCallback(_onTaskData);
         }
       },
       onCancel: () {
-        if (!kIsWeb && Platform.isAndroid) {
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
         }
       },
@@ -106,7 +106,7 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
       (Platform.isLinux
           ? ParecMicRecordingRepository()
           : RecordBackedMicRecordingRepository()) {
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FlutterForegroundTask.addTaskDataCallback(_onTaskData);
     }
   }
@@ -231,7 +231,7 @@ class CompositeMicRecordingRepository implements MicRecordingRepository {
 
   @override
   Future<void> disposeAll() async {
-    if (!kIsWeb && Platform.isAndroid) {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       FlutterForegroundTask.removeTaskDataCallback(_onTaskData);
     }
     await _localRepository.disposeAll();

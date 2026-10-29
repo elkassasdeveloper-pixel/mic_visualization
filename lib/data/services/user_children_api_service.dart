@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
-import 'package:mic_visualization/core/constants/api_endpoints.dart';
-import 'package:mic_visualization/data/models/user_child.dart';
+import 'package:hodhd_visualization/core/constants/api_endpoints.dart';
+import 'package:hodhd_visualization/data/models/user_child.dart';
 
 class UserChildrenApiService {
   UserChildrenApiService({Dio? dio}) : _dio = dio ?? Dio(BaseOptions(baseUrl: ApiEndpoints.baseUrl));

@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:syncfusion_flutter_xlsio/xlsio.dart';
-import 'package:mic_visualization/core/utils/save_file.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/core/utils/save_file.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
 
 class ExcelExportService {
   Future<String> export(List<ClassificationRecord> records) async {

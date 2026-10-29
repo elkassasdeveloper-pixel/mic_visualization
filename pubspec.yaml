@@ -1,11 +1,11 @@
-name: mic_visualization
+name: hodhd_visualization
 description: "Mic's Visualization"
 publish_to: 'none'
 
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.13.4
+  sdk: ^3.13.7
 
 dependencies:
   flutter:
@@ -37,6 +37,7 @@ dependencies:
   flutter_foreground_task: ^11.0.3
   flutter_pcm_sound: ^3.3.3
   flutter_blue_plus: ^2.3.14
+  pointycastle: ^4.0.0
 
 dev_dependencies:
   flutter_test:
@@ -77,3 +78,4 @@ flutter:
    - assets/images/
    - assets/images/tags/
    - assets/models/
+   - assets/security/master_key.txt

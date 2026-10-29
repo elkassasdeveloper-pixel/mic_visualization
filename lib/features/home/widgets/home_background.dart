@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/core/constants/app_images.dart';
-import 'package:mic_visualization/core/theme/theme_cubit.dart';
+import 'package:hodhd_visualization/core/constants/app_images.dart';
+import 'package:hodhd_visualization/core/theme/theme_cubit.dart';
 
 class HomeBackground extends StatelessWidget {
   const HomeBackground({super.key, required this.child});

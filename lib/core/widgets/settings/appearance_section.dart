@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mic_visualization/core/widgets/settings/font_scale_slider.dart';
-import 'package:mic_visualization/core/widgets/settings/theme_switch_tile.dart';
+import 'package:hodhd_visualization/core/widgets/settings/font_scale_slider.dart';
+import 'package:hodhd_visualization/core/widgets/settings/theme_switch_tile.dart';
 
 class AppearanceSection extends StatelessWidget {
   const AppearanceSection({super.key});

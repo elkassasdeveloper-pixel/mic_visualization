@@ -4,21 +4,21 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
-import 'package:mic_visualization/data/models/esp_transport.dart';
-import 'package:mic_visualization/data/models/login_response.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
-import 'package:mic_visualization/data/repositories/classification_repository.dart';
-import 'package:mic_visualization/data/repositories/realtime_repository.dart';
-import 'package:mic_visualization/data/services/auth_api_service.dart';
-import 'package:mic_visualization/data/services/ble_permissions.dart';
-import 'package:mic_visualization/data/services/cloud_api_service.dart';
-import 'package:mic_visualization/data/services/fugo_message_service.dart';
-import 'package:mic_visualization/data/services/user_children_api_service.dart';
-import 'package:mic_visualization/features/home/data/audio_tagging_service.dart';
-import 'package:mic_visualization/features/home/data/mic_device_repository.dart';
-import 'package:mic_visualization/features/home/data/mic_recording_repository.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/data/models/esp_transport.dart';
+import 'package:hodhd_visualization/data/models/login_response.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/repositories/classification_repository.dart';
+import 'package:hodhd_visualization/data/repositories/realtime_repository.dart';
+import 'package:hodhd_visualization/data/services/auth_api_service.dart';
+import 'package:hodhd_visualization/data/services/ble_permissions.dart';
+import 'package:hodhd_visualization/data/services/cloud_api_service.dart';
+import 'package:hodhd_visualization/data/services/fugo_message_service.dart';
+import 'package:hodhd_visualization/data/services/user_children_api_service.dart';
+import 'package:hodhd_visualization/features/home/data/audio_tagging_service.dart';
+import 'package:hodhd_visualization/features/home/data/mic_device_repository.dart';
+import 'package:hodhd_visualization/features/home/data/mic_recording_repository.dart';
 
 class HomeCubit extends Cubit<HomeState> {
   HomeCubit(
@@ -170,7 +170,7 @@ class HomeCubit extends Cubit<HomeState> {
     if (transport == state.transport) return;
 
     final serviceRunning =
-        !kIsWeb && Platform.isAndroid && await FlutterForegroundTask.isRunningService;
+        !kIsWeb && (Platform.isAndroid || Platform.isIOS) && await FlutterForegroundTask.isRunningService;
 
     if (serviceRunning &&
         transport == EspTransport.bluetooth &&

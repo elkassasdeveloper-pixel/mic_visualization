@@ -3,18 +3,18 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
-import 'package:mic_visualization/data/repositories/classification_repository.dart';
-import 'package:mic_visualization/data/repositories/realtime_repository.dart';
-import 'package:mic_visualization/data/services/cloud_api_service.dart';
-import 'package:mic_visualization/features/esp32_control/view/esp32_control_screen.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
-import 'package:mic_visualization/features/home/cubit/home_layout_cubit.dart';
-import 'package:mic_visualization/features/home/data/audio_tagging_service.dart';
-import 'package:mic_visualization/features/home/data/composite_mic_repository.dart';
-import 'package:mic_visualization/features/home/widgets/draggable_mic_button.dart';
-import 'package:mic_visualization/features/home/widgets/home_background.dart';
-import 'package:mic_visualization/features/settings/view/settings_screen.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/repositories/classification_repository.dart';
+import 'package:hodhd_visualization/data/repositories/realtime_repository.dart';
+import 'package:hodhd_visualization/data/services/cloud_api_service.dart';
+import 'package:hodhd_visualization/features/esp32_control/view/esp32_control_screen.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_layout_cubit.dart';
+import 'package:hodhd_visualization/features/home/data/audio_tagging_service.dart';
+import 'package:hodhd_visualization/features/home/data/composite_mic_repository.dart';
+import 'package:hodhd_visualization/features/home/widgets/draggable_mic_button.dart';
+import 'package:hodhd_visualization/features/home/widgets/home_background.dart';
+import 'package:hodhd_visualization/features/settings/view/settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
@@ -116,7 +116,7 @@ class HomeScreen extends StatelessWidget {
 
   /// ESP32 provisioning/broker features rely on Android-only plugins
   /// (foreground service + SmartConfig), so the entry is hidden elsewhere.
-  bool get _esp32Supported => !kIsWeb && Platform.isAndroid;
+  bool get _esp32Supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   Widget _buildDrawer(
       BuildContext context,

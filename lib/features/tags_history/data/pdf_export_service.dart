@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:syncfusion_flutter_pdf/pdf.dart';
-import 'package:mic_visualization/core/utils/save_file.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/core/utils/save_file.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
 import 'package:flutter/material.dart';
 
 class PdfExportService {

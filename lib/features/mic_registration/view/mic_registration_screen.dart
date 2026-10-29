@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
-import 'package:mic_visualization/features/mic_registration/cubit/mic_registration_cubit.dart';
-import 'package:mic_visualization/features/mic_registration/widgets/otp_input.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/features/mic_registration/cubit/mic_registration_cubit.dart';
+import 'package:hodhd_visualization/features/mic_registration/widgets/otp_input.dart';
 
 class MicRegistrationScreen extends StatelessWidget {
   const MicRegistrationScreen({super.key, required this.token});

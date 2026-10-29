@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
 
 class ThemeCubit extends Cubit<ThemeState> {
   ThemeCubit(this._settings)

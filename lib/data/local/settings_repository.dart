@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:mic_visualization/data/models/esp_transport.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/models/esp_transport.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsRepository {

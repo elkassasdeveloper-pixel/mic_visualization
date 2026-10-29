@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:mic_visualization/core/constants/tag_images.dart';
+import 'package:hodhd_visualization/core/constants/tag_images.dart';
 
 class MicIconButton extends StatelessWidget {
   const MicIconButton({

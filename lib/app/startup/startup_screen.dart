@@ -1,23 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/app/startup/startup_cubit.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
-import 'package:mic_visualization/features/home/view/home_screen.dart';
+import 'package:hodhd_visualization/app/startup/startup_cubit.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/features/home/view/home_screen.dart';
 
-class StartupScreen extends StatefulWidget {
+class StartupScreen extends StatelessWidget {
   const StartupScreen({super.key, required this.settingsRepository});
   final SettingsRepository settingsRepository;
-
-  @override
-  State<StartupScreen> createState() => _StartupScreenState();
-}
-
-class _StartupScreenState extends State<StartupScreen> {
-  @override
-  void initState() {
-    super.initState();
-    context.read<StartupCubit>().authenticate();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +20,7 @@ class _StartupScreenState extends State<StartupScreen> {
               HomeScreen(
                 taggingService: taggingService,
                 realtimeRepository: realtimeRepository,
-                settingsRepository: widget.settingsRepository,
+                settingsRepository: settingsRepository,
                 adminToken: adminToken,
                 slotTokens: slotTokens,
                 fugoTokens: fugoTokens,

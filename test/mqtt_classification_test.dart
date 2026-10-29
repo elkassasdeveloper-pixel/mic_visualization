@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
-import 'package:mic_visualization/features/home/data/composite_mic_repository.dart';
+import 'package:hodhd_visualization/core/constants/audio_tagging_config.dart';
+import 'package:hodhd_visualization/features/home/data/composite_mic_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

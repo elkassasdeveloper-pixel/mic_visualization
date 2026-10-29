@@ -1,4 +1,4 @@
-package com.hodhdsoft.mic_visualization
+package com.hodhdsoft.hodhd_visualization
 
 import io.flutter.embedding.android.FlutterActivity
 

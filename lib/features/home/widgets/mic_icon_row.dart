@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
-import 'package:mic_visualization/features/home/widgets/mic_icon_button.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/features/home/widgets/mic_icon_button.dart';
 
 class MicIconRow extends StatelessWidget {
   const MicIconRow({

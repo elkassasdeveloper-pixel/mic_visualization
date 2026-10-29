@@ -7,9 +7,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
 
-import 'package:mic_visualization/main.dart';
+import 'package:hodhd_visualization/main.dart';
 
 void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {

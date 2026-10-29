@@ -14,7 +14,7 @@ class AppDatabase {
 
   Future<Database> _init() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'mic_visualization.db');
+    final path = join(dbPath, 'hodhd_visualization.db');
 
     return openDatabase(
       path,

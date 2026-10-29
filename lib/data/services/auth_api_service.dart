@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:mic_visualization/core/constants/api_endpoints.dart';
-import 'package:mic_visualization/data/models/login_response.dart';
+import 'package:hodhd_visualization/core/constants/api_endpoints.dart';
+import 'package:hodhd_visualization/data/models/login_response.dart';
 
 class AuthApiService {
   AuthApiService({Dio? dio})

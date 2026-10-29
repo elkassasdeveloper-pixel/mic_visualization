@@ -25,6 +25,8 @@ class MiniMqttBroker {
   StreamController<List<String>>.broadcast();
   final StreamController<MqttAudioChunk> _audioController =
   StreamController<MqttAudioChunk>.broadcast();
+  final StreamController<MqttAudioChunk> _videoController =
+  StreamController<MqttAudioChunk>.broadcast();
 
   Stream<String> get logStream => _logController.stream;
   Stream<int> get clientCountStream => _clientCountController.stream;
@@ -33,6 +35,9 @@ class MiniMqttBroker {
   /// "esp32-AABBCCDDEEFF") every time a client connects or disconnects.
   Stream<List<String>> get clientIdsStream => _clientIdsController.stream;
   Stream<MqttAudioChunk> get audioStream => _audioController.stream;
+
+  /// Camera frames (topic "esp32/video"): one JPEG (or encrypted JPEG) per event.
+  Stream<MqttAudioChunk> get videoStream => _videoController.stream;
 
   List<String> get connectedClientIds => (_clients.values
       .map((c) => c.clientId)
@@ -49,6 +54,9 @@ class MiniMqttBroker {
 
   int get connectedClientCount => _clients.length;
   bool get isRunning => _server != null;
+
+  /// Set by the task handler: appends the authentication tag to announcements.
+  String Function(String body)? signDiscovery;
 
   Future<void> start(int port) async {
     if (_server != null) return;
@@ -76,7 +84,7 @@ class MiniMqttBroker {
     }
     _announceSocket!.broadcastEnabled = true;
 
-    final message = utf8.encode('MQTT_BROKER:$ip');
+    final body = 'MQTT_BROKER:$ip';
 
     // Limited broadcast + subnet-directed broadcast (assumes a /24 network,
     // which is what home routers use). Some routers/APs drop one of them.
@@ -86,15 +94,27 @@ class MiniMqttBroker {
       targets.add(InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255'));
     }
 
+    var errorLogged = false;
     _announceTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      final message = utf8.encode(signDiscovery?.call(body) ?? body);
       for (final target in targets) {
         try {
-          _announceSocket?.send(message, target, discoveryPort);
-        } catch (_) {}
+          final sent = _announceSocket?.send(message, target, discoveryPort);
+          if (sent == 0 && !errorLogged) {
+            errorLogged = true;
+            _log('Discovery broadcast to ${target.address} was not sent');
+          }
+        } catch (e) {
+          if (!errorLogged) {
+            errorLogged = true;
+            _log('Discovery broadcast to ${target.address} failed: $e');
+          }
+        }
       }
     });
 
-    _log('Announcing broker IP $ip on UDP:$discoveryPort');
+    _log('Announcing broker IP $ip to '
+        '${targets.map((t) => t.address).join(', ')} on UDP:$discoveryPort');
   }
 
   static bool _isPrivateIPv4(String a) =>
@@ -113,9 +133,9 @@ class MiniMqttBroker {
     );
 
     _log('Network interfaces: ${interfaces
-            .map((i) =>
-        '${i.name}=${i.addresses.map((a) => a.address).join('/')}')
-            .join(', ')}');
+        .map((i) =>
+    '${i.name}=${i.addresses.map((a) => a.address).join('/')}')
+        .join(', ')}');
 
     const wifiPrefixes = ['wlan', 'swlan', 'ap', 'eth', 'en'];
     const mobilePrefixes = ['rmnet', 'ccmni', 'pdp', 'tun', 'ppp', 'dummy', 'v4-'];
@@ -161,6 +181,7 @@ class MiniMqttBroker {
     _clientCountController.close();
     _clientIdsController.close();
     _audioController.close();
+    _videoController.close();
   }
 
   void _log(String message) {
@@ -419,6 +440,26 @@ class MiniMqttBroker {
 
     if (offset > packet.length) return;
     final payload = packet.sublist(offset);
+
+    // Camera frames have their own topic; everything else is audio as before.
+    if (topic == 'esp32/video') {
+      if (!_videoController.isClosed) {
+        _videoController.add(MqttAudioChunk(
+          clientId: state.clientId,
+          payload: payload,
+        ));
+      }
+      if (qos == 1) {
+        try {
+          socket.add(
+              Uint8List.fromList([0x40, 0x02, packetId >> 8, packetId & 0xFF]));
+        } catch (e) {
+          _log('Error sending PUBACK: $e');
+        }
+      }
+      return; // not forwarded to other clients, and no per-frame log line
+    }
+
     if (!_audioController.isClosed) {
       _audioController.add(MqttAudioChunk(
         clientId: state.clientId,

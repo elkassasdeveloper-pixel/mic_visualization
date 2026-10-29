@@ -1,17 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/core/widgets/settings/appearance_section.dart';
-import 'package:mic_visualization/core/widgets/settings/background_section.dart';
-import 'package:mic_visualization/core/widgets/settings/layout_reset_tile.dart';
-import 'package:mic_visualization/core/widgets/settings/perf_monitor_card.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
-import 'package:mic_visualization/data/repositories/classification_repository.dart';
-import 'package:mic_visualization/features/home/cubit/home_cubit.dart';
-import 'package:mic_visualization/features/home/cubit/home_layout_cubit.dart';
-import 'package:mic_visualization/features/home/widgets/min_confidence_slider.dart';
-import 'package:mic_visualization/features/mic_registration/view/mic_registration_screen.dart';
-import 'package:mic_visualization/features/registered_mics/view/registered_mics_screen.dart';
-import 'package:mic_visualization/features/tags_history/view/tags_history_screen.dart';
+import 'package:hodhd_visualization/core/widgets/settings/appearance_section.dart';
+import 'package:hodhd_visualization/core/widgets/settings/background_section.dart';
+import 'package:hodhd_visualization/core/widgets/settings/layout_reset_tile.dart';
+import 'package:hodhd_visualization/core/widgets/settings/perf_monitor_card.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/repositories/classification_repository.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_cubit.dart';
+import 'package:hodhd_visualization/features/home/cubit/home_layout_cubit.dart';
+import 'package:hodhd_visualization/features/home/widgets/min_confidence_slider.dart';
+import 'package:hodhd_visualization/features/mic_registration/view/mic_registration_screen.dart';
+import 'package:hodhd_visualization/features/registered_mics/view/registered_mics_screen.dart';
+import 'package:hodhd_visualization/features/tags_history/view/tags_history_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.classificationRepository, required this.adminToken, required this.settingsRepository});

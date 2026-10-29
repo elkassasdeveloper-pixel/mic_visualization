@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:mic_visualization/features/home/data/mic_recording_repository.dart';
+import 'package:hodhd_visualization/features/home/data/mic_recording_repository.dart';
 import 'package:record/record.dart';
-import 'package:mic_visualization/core/constants/audio_tagging_config.dart';
+import 'package:hodhd_visualization/core/constants/audio_tagging_config.dart';
 
 class RecordBackedMicRecordingRepository implements MicRecordingRepository{
   final Map<String, AudioRecorder> _recorders = {};

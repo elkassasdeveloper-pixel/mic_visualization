@@ -1,14 +1,16 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/data/local/settings_repository.dart';
-import 'package:mic_visualization/data/repositories/auth_repository.dart';
-import 'package:mic_visualization/data/repositories/realtime_repository.dart';
-import 'package:mic_visualization/data/services/user_children_api_service.dart';
-import 'package:mic_visualization/features/home/data/audio_tagging_service.dart';
+import 'package:hodhd_visualization/data/local/settings_repository.dart';
+import 'package:hodhd_visualization/data/repositories/auth_repository.dart';
+import 'package:hodhd_visualization/data/repositories/realtime_repository.dart';
+import 'package:hodhd_visualization/data/services/user_children_api_service.dart';
+import 'package:hodhd_visualization/features/home/data/audio_tagging_service.dart';
 
 class StartupCubit extends Cubit<StartupState> {
   StartupCubit(this._authRepository, this._realtimeRepository, this._settings)
-      : super(const StartupInitial());
+      : super(const StartupInitial()){
+    authenticate();
+  }
 
   final AuthRepository _authRepository;
   final RealtimeRepository _realtimeRepository;

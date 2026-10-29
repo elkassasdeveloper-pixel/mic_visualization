@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:centrifuge/centrifuge.dart' as centrifuge;
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:mic_visualization/core/constants/centrifuge_config.dart';
-import 'package:mic_visualization/data/services/centrifuge_client_factory.dart';
+import 'package:hodhd_visualization/core/constants/centrifuge_config.dart';
+import 'package:hodhd_visualization/data/services/centrifuge_client_factory.dart';
 
 abstract class RealtimeRepository {
   Future<void> connectSlot(String slot, String userJwtToken);

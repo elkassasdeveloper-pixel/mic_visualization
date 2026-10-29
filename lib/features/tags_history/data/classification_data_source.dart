@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' show DateFormat;
-import 'package:mic_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
 
 class ClassificationDataSource extends DataGridSource {
   ClassificationDataSource(List<ClassificationRecord> records,List<RegisteredMic> registeredMics) {

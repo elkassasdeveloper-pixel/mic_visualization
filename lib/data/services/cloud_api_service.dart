@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
-import 'package:mic_visualization/core/constants/api_endpoints.dart';
-import 'package:mic_visualization/data/models/classification_record.dart';
+import 'package:hodhd_visualization/core/constants/api_endpoints.dart';
+import 'package:hodhd_visualization/data/models/classification_record.dart';
 
 class CloudApiService {
   CloudApiService({Dio? dio})

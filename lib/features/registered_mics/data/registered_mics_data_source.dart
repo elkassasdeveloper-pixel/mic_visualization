@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:syncfusion_flutter_datagrid/datagrid.dart';
-import 'package:mic_visualization/data/models/registered_mic.dart';
+import 'package:hodhd_visualization/data/models/registered_mic.dart';
 
 class RegisteredMicsDataSource extends DataGridSource {
   RegisteredMicsDataSource(List<RegisteredMic> mics, this.onCellCopied) {

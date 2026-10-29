@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:mic_visualization/core/theme/theme_cubit.dart';
-import 'package:mic_visualization/core/widgets/settings/background_picker_tile.dart';
+import 'package:hodhd_visualization/core/theme/theme_cubit.dart';
+import 'package:hodhd_visualization/core/widgets/settings/background_picker_tile.dart';
 
 class BackgroundSection extends StatelessWidget {
   const BackgroundSection({super.key});

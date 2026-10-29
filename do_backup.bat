@@ -16,7 +16,7 @@ set dest=C:\work\done\%today%
 if not exist "%dest%" mkdir "%dest%"
 
 REM اسم الملف النهائي مع التاريخ والوقت
-set backup_name=mic_visualization_%today%_%time%.7z
+set backup_name=hodhd_visualization_%today%_%time%.7z
 
 REM ضغط الملفات الأساسية
 c:\tools\7zc\7z a -y -ssw -t7z %backup_name% ^
